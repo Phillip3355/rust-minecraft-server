@@ -13,7 +13,7 @@ pub struct FreezeTopLayerFeature;
 impl FreezeTopLayerFeature {
     pub fn generate<T: GenerationCache>(
         chunk: &mut T,
-        _min_y: i8,
+        _min_y: i16,
         _height: u16,
         _feature_name: pumpkin_data::placed_feature::PlacedFeature,
         _random: &mut RandomGenerator,

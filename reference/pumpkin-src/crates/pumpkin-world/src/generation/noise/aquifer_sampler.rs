@@ -256,7 +256,7 @@ impl WorldAquiferSampler {
         chunk_x: i32,
         chunk_z: i32,
         random_deriver: &XoroshiroSplitter,
-        minimum_y: i8,
+        minimum_y: i16,
         height: u16,
         fluid_level: StandardChunkFluidLevelSampler,
     ) -> Self {

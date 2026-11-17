@@ -6,7 +6,7 @@ use super::biome_coords;
 
 // This blends biome boundaries, returning which biome to populate the surface on based on the seed
 pub fn get_biome_blend(
-    bottom_y: i8,
+    bottom_y: i16,
     height: u16,
     seed: i64,
     x: i32,
@@ -225,7 +225,7 @@ mod test {
 
         let seed = hash_seed((-777i64) as u64);
         for (i, (x, y, z, result_x, result_y, result_z)) in data.into_iter().enumerate() {
-            let result = get_biome_blend(i8::MIN, u16::MAX, seed, x, y, z);
+            let result = get_biome_blend(i16::from(i8::MIN), u16::MAX, seed, x, y, z);
             let expected = Vector3::new(result_x, result_y, result_z);
             assert_eq!(
                 result, expected,

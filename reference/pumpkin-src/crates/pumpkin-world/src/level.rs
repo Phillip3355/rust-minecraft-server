@@ -561,11 +561,9 @@ impl Level {
                 let chunk = chunk.value();
                 let chunk_x_base = chunk.x * 16;
                 let chunk_z_base = chunk.z * 16;
-                let section_count = chunk.section.count;
 
-                // Use the bitmask to skip sections
-                let mask = chunk.section.randomly_ticking_mask.load(Ordering::Relaxed);
-                if mask != 0 {
+                let mut ticking_sections = chunk.section.random_tick_section_indices().peekable();
+                if ticking_sections.peek().is_some() {
                     let sections = chunk
                         .section
                         .block_sections
@@ -573,10 +571,7 @@ impl Level {
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     let min_y = chunk.section.min_y;
 
-                    for i in 0..section_count {
-                        if (mask & (1 << i)) == 0 {
-                            continue;
-                        }
+                    for i in ticking_sections {
                         let y_base = min_y + (i as i32 * 16);
                         for _ in 0..samples_per_section {
                             let r = rand::random::<u32>();

@@ -159,6 +159,8 @@ pub struct AdvancedConfiguration {
     pub resource_pack: ResourcePackConfig,
     /// World and level-related settings beyond basic configuration.
     pub world: LevelConfig,
+    /// Development features that require explicit opt-in.
+    pub experimental: ExperimentalConfiguration,
     /// Networking-related features such as compression, authentication, and LAN broadcast.
     pub networking: NetworkingConfig,
     /// Command system configuration, including availability and permissions.
@@ -181,6 +183,33 @@ pub struct AdvancedConfiguration {
     pub advancement: AdvancementConfig,
     /// Update checker configuration.
     pub update_checker: UpdateCheckerConfig,
+}
+
+/// Experimental settings for the server.
+#[derive(Deserialize, Serialize, Default)]
+#[serde(default)]
+pub struct ExperimentalConfiguration {
+    /// Experimental world generation.
+    pub worldgen: ExperimentalWorldgen,
+}
+
+/// Selection of a separately built world generation profile.
+#[derive(Deserialize, Serialize)]
+#[serde(default)]
+pub struct ExperimentalWorldgen {
+    /// Enable the selected world generation profile.
+    pub enabled: bool,
+    /// Identifier of the build profile to use.
+    pub profile: String,
+}
+
+impl Default for ExperimentalWorldgen {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            profile: "terralith_incendium_extreme_v1".to_owned(),
+        }
+    }
 }
 
 /// Basic configuration for core server settings.

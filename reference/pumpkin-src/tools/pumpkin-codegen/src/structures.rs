@@ -1018,7 +1018,7 @@ pub fn build() -> TokenStream {
 
         impl HeightProvider {
             #[must_use]
-            pub fn get(&self, random: &mut RandomGenerator, min_y: i8, height: u16) -> i32 {
+            pub fn get(&self, random: &mut RandomGenerator, min_y: i16, height: u16) -> i32 {
                 match self {
                     Self::Uniform(provider) => provider.get(random, min_y, height),
                     Self::Trapezoid(provider) => provider.get(random, min_y, height),
@@ -1035,9 +1035,9 @@ pub fn build() -> TokenStream {
 
         impl UniformHeightProvider {
             #[must_use]
-            pub fn get(&self, random: &mut RandomGenerator, min_y: i8, height: u16) -> i32 {
-                let min = self.min_inclusive.get_y(min_y as i16, height);
-                let max = self.max_inclusive.get_y(min_y as i16, height);
+            pub fn get(&self, random: &mut RandomGenerator, min_y: i16, height: u16) -> i32 {
+                let min = self.min_inclusive.get_y(min_y, height);
+                let max = self.max_inclusive.get_y(min_y, height);
                 if min >= max {
                     min
                 } else {
@@ -1055,10 +1055,10 @@ pub fn build() -> TokenStream {
 
         impl TrapezoidHeightProvider {
             #[must_use]
-            pub fn get(&self, random: &mut RandomGenerator, min_y: i8, height: u16) -> i32 {
+            pub fn get(&self, random: &mut RandomGenerator, min_y: i16, height: u16) -> i32 {
                 let plateau = self.plateau.unwrap_or(0);
-                let i = self.min_inclusive.get_y(min_y as i16, height);
-                let j = self.max_inclusive.get_y(min_y as i16, height);
+                let i = self.min_inclusive.get_y(min_y, height);
+                let j = self.max_inclusive.get_y(min_y, height);
 
                 if i >= j {
                     return i;
@@ -1084,9 +1084,9 @@ pub fn build() -> TokenStream {
 
         impl VeryBiasedToBottomHeightProvider {
             #[must_use]
-            pub fn get(&self, random: &mut RandomGenerator, min_y: i8, height: u16) -> i32 {
-                let min = self.min_inclusive.get_y(min_y as i16, height);
-                let max = self.max_inclusive.get_y(min_y as i16, height);
+            pub fn get(&self, random: &mut RandomGenerator, min_y: i16, height: u16) -> i32 {
+                let min = self.min_inclusive.get_y(min_y, height);
+                let max = self.max_inclusive.get_y(min_y, height);
                 let inner = self.inner.map_or(1, std::num::NonZero::get) as i32;
 
                 if max - min - inner + 1 <= 0 {

@@ -16,7 +16,7 @@ pub struct NoiseSettings {
 pub type GenerationSettings = NoiseSettings;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GenerationShapeConfig {
-    pub min_y: i8,
+    pub min_y: i16,
     pub height: u16,
     pub size_horizontal: u8,
     pub size_vertical: u8,
@@ -41,7 +41,7 @@ impl GenerationShapeConfig {
         }
     }
     #[must_use]
-    pub fn trim_height(&self, bottom_y: i8, top_y: u16) -> Self {
+    pub fn trim_height(&self, bottom_y: i16, top_y: u16) -> Self {
         let new_min = self.min_y.max(bottom_y);
         let this_top = if self.min_y >= 0 {
             self.height + self.min_y as u16
@@ -70,7 +70,7 @@ impl NoiseSettings {
         sea_level: 63i32,
         default_fluid: crate::Block::WATER.default_state,
         shape: GenerationShapeConfig {
-            min_y: -64i8,
+            min_y: -64i16,
             height: 384u16,
             size_horizontal: 1u8,
             size_vertical: 2u8,
@@ -104,7 +104,7 @@ impl NoiseSettings {
         sea_level: 32i32,
         default_fluid: crate::Block::WATER.default_state,
         shape: GenerationShapeConfig {
-            min_y: -64i8,
+            min_y: -64i16,
             height: 192u16,
             size_horizontal: 1u8,
             size_vertical: 2u8,
@@ -119,7 +119,7 @@ impl NoiseSettings {
         sea_level: 0i32,
         default_fluid: crate::Block::AIR.default_state,
         shape: GenerationShapeConfig {
-            min_y: 0i8,
+            min_y: 0i16,
             height: 128u16,
             size_horizontal: 2u8,
             size_vertical: 1u8,
@@ -134,7 +134,7 @@ impl NoiseSettings {
         sea_level: -64i32,
         default_fluid: crate::Block::WATER.default_state,
         shape: GenerationShapeConfig {
-            min_y: 0i8,
+            min_y: 0i16,
             height: 256u16,
             size_horizontal: 2u8,
             size_vertical: 1u8,
@@ -149,7 +149,7 @@ impl NoiseSettings {
         sea_level: 63i32,
         default_fluid: crate::Block::WATER.default_state,
         shape: GenerationShapeConfig {
-            min_y: -64i8,
+            min_y: -64i16,
             height: 384u16,
             size_horizontal: 1u8,
             size_vertical: 2u8,
@@ -183,7 +183,7 @@ impl NoiseSettings {
         sea_level: 32i32,
         default_fluid: crate::Block::LAVA.default_state,
         shape: GenerationShapeConfig {
-            min_y: 0i8,
+            min_y: 0i16,
             height: 128u16,
             size_horizontal: 1u8,
             size_vertical: 2u8,
@@ -198,7 +198,7 @@ impl NoiseSettings {
         sea_level: 63i32,
         default_fluid: crate::Block::WATER.default_state,
         shape: GenerationShapeConfig {
-            min_y: -64i8,
+            min_y: -64i16,
             height: 384u16,
             size_horizontal: 1u8,
             size_vertical: 2u8,

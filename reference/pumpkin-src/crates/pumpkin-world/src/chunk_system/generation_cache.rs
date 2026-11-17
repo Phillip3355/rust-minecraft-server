@@ -183,7 +183,7 @@ impl HeightLimitView for Cache {
         }
     }
 
-    fn bottom_y(&self) -> i8 {
+    fn bottom_y(&self) -> i16 {
         let mid = ((self.size * self.size) >> 1) as usize;
         match &self.chunks[mid] {
             Chunk::Proto(chunk) => chunk.bottom_y(),

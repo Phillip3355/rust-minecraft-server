@@ -16,7 +16,7 @@ impl SimpleRandomFeature {
         &self,
         chunk: &mut T,
         block_registry: &dyn WorldPortalExt,
-        min_y: i8,
+        min_y: i16,
         height: u16,
         feature_name: pumpkin_data::placed_feature::PlacedFeature, // This placed feature
         random: &mut RandomGenerator,

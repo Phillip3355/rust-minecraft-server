@@ -12,7 +12,7 @@ impl KelpFeature {
     #[allow(clippy::too_many_arguments)]
     pub fn generate<T: GenerationCache>(
         chunk: &mut T,
-        _min_y: i8,
+        _min_y: i16,
         _height: u16,
         _feature: pumpkin_data::placed_feature::PlacedFeature,
         random: &mut RandomGenerator,

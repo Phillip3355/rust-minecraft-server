@@ -46,7 +46,7 @@ impl FossilFeature {
     pub fn generate<T: GenerationCache>(
         &self,
         chunk: &mut T,
-        min_y: i8,
+        min_y: i16,
         height: u16,
         random: &mut RandomGenerator,
         pos: BlockPos,

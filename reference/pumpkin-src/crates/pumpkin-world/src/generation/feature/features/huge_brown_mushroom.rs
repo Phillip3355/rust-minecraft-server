@@ -37,7 +37,7 @@ impl HugeBrownMushroomFeature {
     pub fn generate<T: GenerationCache>(
         &self,
         chunk: &mut T,
-        min_y: i8,
+        min_y: i16,
         height: u16,
         _feature: pumpkin_data::placed_feature::PlacedFeature,
         random: &mut RandomGenerator,

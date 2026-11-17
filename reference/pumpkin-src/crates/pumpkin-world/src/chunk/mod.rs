@@ -12,7 +12,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 use thiserror::Error;
 
 pub mod format;
@@ -99,15 +99,12 @@ pub struct ChunkEntityData {
 
 /// Represents pure block data for a chunk.
 /// Subchunks are vertical portions of a chunk. They are 16 blocks tall.
-/// There are currently 24 subchunks per chunk.
-///
-/// A chunk can be:
-/// - Subchunks: 24 separate subchunks are stored.
+/// Section count is determined by the dimension height.
 pub struct ChunkSections {
     pub count: usize,
     pub block_sections: RwLock<Box<[BlockPalette]>>,
     pub random_tick_sections: RwLock<Option<Box<[RandomTickSectionCache]>>>,
-    pub randomly_ticking_mask: std::sync::atomic::AtomicU32,
+    randomly_ticking_mask: Box<[AtomicU64]>,
     pub biome_sections: RwLock<Box<[BiomePalette]>>,
     pub min_y: i32,
 }
@@ -191,40 +188,70 @@ impl ChunkHeightmapType {
 
 #[derive(Debug, Clone)]
 pub struct ChunkHeightmaps {
+    bits: usize,
     pub world_surface: Option<Box<[i64]>>,
     pub motion_blocking: Option<Box<[i64]>>,
     pub motion_blocking_no_leaves: Option<Box<[i64]>>,
 }
 
 impl ChunkHeightmaps {
-    /// Longs a heightmap occupies: 256 columns of 9 bits, 7 columns per long.
-    pub const LONGS: usize = 37;
+    // Keep the original packing for legacy dimensions and older saves.
+    pub(super) const LEGACY_BITS: usize = 9;
+
+    pub(crate) fn for_sections(section_count: usize) -> Self {
+        Self::with_bits(Self::bits_for_sections(section_count))
+    }
+
+    pub(super) fn bits_for_sections(section_count: usize) -> usize {
+        ((section_count * BlockPalette::SIZE)
+            .checked_ilog2()
+            .unwrap_or(0) as usize
+            + 1)
+        .max(Self::LEGACY_BITS)
+    }
+
+    pub(super) const fn with_bits(bits: usize) -> Self {
+        Self {
+            bits,
+            world_surface: None,
+            motion_blocking: None,
+            motion_blocking_no_leaves: None,
+        }
+    }
+
+    pub(super) const fn longs_for_bits(bits: usize) -> usize {
+        CHUNK_AREA.div_ceil(64 / bits)
+    }
+
+    #[must_use]
+    pub const fn packed_len(&self) -> usize {
+        Self::longs_for_bits(self.bits)
+    }
 
     pub fn set(&mut self, heightmap: ChunkHeightmapType, x: i32, z: i32, height: i32, min_y: i32) {
+        let packed_len = self.packed_len();
         let data = match heightmap {
             ChunkHeightmapType::WorldSurface => &mut self.world_surface,
             ChunkHeightmapType::MotionBlocking => &mut self.motion_blocking,
             ChunkHeightmapType::MotionBlockingNoLeaves => &mut self.motion_blocking_no_leaves,
         };
 
-        let data = data.get_or_insert_with(|| vec![0; Self::LONGS].into_boxed_slice());
+        let data = data.get_or_insert_with(|| vec![0; packed_len].into_boxed_slice());
 
         let local_x = (x & 15) as usize;
         let local_z = (z & 15) as usize;
         let column_idx = local_z * 16 + local_x;
 
-        // In Minecraft 1.16+, height is stored as (y - min_y + 1). 0 means below min_y.
-        // It uses 9 bits per value, packed such that they do not cross u64 boundaries.
-        // 64 / 9 = 7 values per u64.
+        // A zero entry means the column is empty. Values never span two longs.
         let val = (height - min_y + 1).max(0) as u64;
-
-        let array_idx = column_idx / 7;
-        let shift = (column_idx % 7) * 9;
-
-        let mask = 0x1FFu64 << shift;
+        let entries_per_word = 64 / self.bits;
+        let array_idx = column_idx / entries_per_word;
+        let shift = (column_idx % entries_per_word) * self.bits;
+        let value_mask = (1u64 << self.bits) - 1;
+        let mask = value_mask << shift;
 
         let mut current = data[array_idx] as u64;
-        current = (current & !mask) | ((val & 0x1FF) << shift);
+        current = (current & !mask) | ((val & value_mask) << shift);
         data[array_idx] = current as i64;
     }
 
@@ -244,11 +271,12 @@ impl ChunkHeightmaps {
         let local_z = (z & 15) as usize;
         let column_idx = local_z * 16 + local_x;
 
-        let array_idx = column_idx / 7;
-        let shift = (column_idx % 7) * 9;
+        let entries_per_word = 64 / self.bits;
+        let array_idx = column_idx / entries_per_word;
+        let shift = (column_idx % entries_per_word) * self.bits;
 
         let current = data[array_idx] as u64;
-        let val = (current >> shift) & 0x1FF;
+        let val = (current >> shift) & ((1u64 << self.bits) - 1);
 
         (val as i32) + min_y - 1
     }
@@ -296,20 +324,18 @@ impl ChunkHeightmaps {
 /// The Heightmap for a completely empty chunk
 impl Default for ChunkHeightmaps {
     fn default() -> Self {
-        Self {
-            motion_blocking: None,
-            motion_blocking_no_leaves: None,
-            world_surface: None,
-        }
+        Self::with_bits(Self::LEGACY_BITS)
     }
 }
 
 impl ChunkSections {
     #[must_use]
-    pub fn build_random_tick_sections_cache(
+    fn build_random_tick_sections_cache(
         block_sections: &[BlockPalette],
-    ) -> (Option<Box<[RandomTickSectionCache]>>, u32) {
-        let mut mask = 0;
+    ) -> (Option<Box<[RandomTickSectionCache]>>, Box<[AtomicU64]>) {
+        let mask = (0..block_sections.len().div_ceil(64))
+            .map(|_| AtomicU64::new(0))
+            .collect::<Box<[_]>>();
         let mut has_ticks = false;
         let cache = block_sections
             .iter()
@@ -318,7 +344,7 @@ impl ChunkSections {
                 let (random_ticking_block_count, random_ticking_fluid_count) =
                     section.random_ticking_counts();
                 if random_ticking_block_count > 0 || random_ticking_fluid_count > 0 {
-                    mask |= 1 << i;
+                    mask[i / 64].fetch_or(1u64 << (i % 64), Ordering::Relaxed);
                     has_ticks = true;
                 }
                 RandomTickSectionCache {
@@ -329,11 +355,39 @@ impl ChunkSections {
             .collect::<Vec<_>>()
             .into_boxed_slice();
 
-        if has_ticks {
-            (Some(cache), mask)
+        (has_ticks.then_some(cache), mask)
+    }
+
+    pub(crate) fn random_tick_section_indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.randomly_ticking_mask
+            .iter()
+            .enumerate()
+            .flat_map(|(word_index, word)| {
+                let mut bits = word.load(Ordering::Relaxed);
+                std::iter::from_fn(move || {
+                    if bits == 0 {
+                        return None;
+                    }
+                    let bit = bits.trailing_zeros() as usize;
+                    bits &= bits - 1;
+                    Some(word_index * 64 + bit)
+                })
+            })
+    }
+
+    fn update_random_tick_mask(&self, section_index: usize, active: bool) {
+        let mask = &self.randomly_ticking_mask[section_index / 64];
+        let bit = 1u64 << (section_index % 64);
+        if active {
+            mask.fetch_or(bit, Ordering::Relaxed);
         } else {
-            (None, 0)
+            mask.fetch_and(!bit, Ordering::Relaxed);
         }
+    }
+
+    #[must_use]
+    pub fn heightmap_packed_len(&self) -> usize {
+        ChunkHeightmaps::longs_for_bits(ChunkHeightmaps::bits_for_sections(self.count))
     }
 
     #[must_use]
@@ -347,7 +401,7 @@ impl ChunkSections {
             count: num_sections,
             block_sections: RwLock::new(block_sections),
             random_tick_sections: RwLock::new(random_tick_sections),
-            randomly_ticking_mask: std::sync::atomic::AtomicU32::new(randomly_ticking_mask),
+            randomly_ticking_mask,
             biome_sections: RwLock::new(biome_sections),
             min_y,
         }
@@ -372,7 +426,7 @@ impl ChunkSections {
             count,
             block_sections: RwLock::new(block_sections),
             random_tick_sections: RwLock::new(random_tick_sections),
-            randomly_ticking_mask: std::sync::atomic::AtomicU32::new(randomly_ticking_mask),
+            randomly_ticking_mask,
             biome_sections: RwLock::new(biome_sections),
             min_y,
         }
@@ -552,17 +606,10 @@ impl ChunkSections {
                         .saturating_add(1);
                 }
 
-                // Update the bitmask
-                let mut mask = self
-                    .randomly_ticking_mask
-                    .load(std::sync::atomic::Ordering::Relaxed);
-                if random_tick_cache.is_randomly_ticking() {
-                    mask |= 1 << section_index;
-                } else {
-                    mask &= !(1 << section_index);
-                }
-                self.randomly_ticking_mask
-                    .store(mask, std::sync::atomic::Ordering::Relaxed);
+                self.update_random_tick_mask(
+                    section_index,
+                    random_tick_cache.is_randomly_ticking(),
+                );
             }
 
             return Some(replaced_block_state_id);
@@ -630,9 +677,14 @@ impl ChunkSections {
 impl ChunkData {
     #[must_use]
     pub fn empty(x: i32, z: i32) -> Self {
+        Self::empty_with_sections(x, z, 24, -64)
+    }
+
+    #[must_use]
+    pub fn empty_with_sections(x: i32, z: i32, section_count: usize, min_y: i32) -> Self {
         Self {
-            section: ChunkSections::new(24, -64),
-            heightmap: std::sync::Mutex::new(ChunkHeightmaps::default()),
+            section: ChunkSections::new(section_count, min_y),
+            heightmap: std::sync::Mutex::new(ChunkHeightmaps::for_sections(section_count)),
             x,
             z,
             block_ticks: ChunkTickScheduler::default(),
@@ -768,18 +820,10 @@ impl ChunkData {
                                 .saturating_add(1);
                         }
 
-                        let mut mask = self
-                            .section
-                            .randomly_ticking_mask
-                            .load(std::sync::atomic::Ordering::Relaxed);
-                        if random_tick_cache.is_randomly_ticking() {
-                            mask |= 1 << section_index;
-                        } else {
-                            mask &= !(1 << section_index);
-                        }
-                        self.section
-                            .randomly_ticking_mask
-                            .store(mask, std::sync::atomic::Ordering::Relaxed);
+                        self.section.update_random_tick_mask(
+                            section_index,
+                            random_tick_cache.is_randomly_ticking(),
+                        );
                     }
                 }
                 results.push((rel_x, y, rel_z, replaced_id));
@@ -828,7 +872,7 @@ impl ChunkData {
             ChunkHeightmapType::MotionBlocking,
             ChunkHeightmapType::MotionBlockingNoLeaves,
         ] {
-            heightmap.update(hm_type, x, z, y, block_state, min_y, |y_at| {
+            heightmap.update(hm_type, x, y, z, block_state, min_y, |y_at| {
                 let id = self
                     .section
                     .get_block_absolute_y(relative_x, y_at, relative_z)
@@ -886,7 +930,7 @@ impl ChunkData {
     //TODO: Tracking heightmaps update.
     pub fn calculate_heightmap(&self) -> ChunkHeightmaps {
         let highest_non_empty_subchunk = self.get_highest_non_empty_subchunk();
-        let mut heightmaps = ChunkHeightmaps::default();
+        let mut heightmaps = ChunkHeightmaps::for_sections(self.section.count);
 
         for x in 0..16 {
             for z in 0..16 {
@@ -910,7 +954,7 @@ impl ChunkData {
         x: usize,
         z: usize,
     ) {
-        let start_height = (start_sub_chunk as i32) * 16 - self.section.min_y.abs() + 15;
+        let start_height = (start_sub_chunk as i32) * 16 + self.section.min_y + 15;
         let mut has_found = [false, false, false];
 
         for y in (self.section.min_y..=start_height).rev() {

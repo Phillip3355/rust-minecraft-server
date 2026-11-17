@@ -1,10 +1,8 @@
 use std::{
+    borrow::Cow,
     path::PathBuf,
     str::FromStr,
-    sync::{
-        RwLock,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
 use bytes::{Buf, BufMut, Bytes};
@@ -275,7 +273,9 @@ impl ChunkData {
         if let Some(sections_list) = root_tag.get_list("sections") {
             for section_tag in sections_list {
                 if let pumpkin_nbt::tag::NbtTag::Compound(section_compound) = section_tag {
-                    let y = section_y(section_compound) as i8;
+                    let Ok(y) = i8::try_from(section_y(section_compound)) else {
+                        continue;
+                    };
                     if y > max_y_section {
                         max_y_section = y;
                     }
@@ -379,40 +379,25 @@ impl ChunkData {
 
         // Assemble the ChunkSections
         let min_y = section_coords::section_to_block(i32::from(min_y_section));
-        let (random_tick_sections, randomly_ticking_mask) =
-            ChunkSections::build_random_tick_sections_cache(&block_palettes);
-        let section = ChunkSections {
-            count: block_palettes.len(),
-            block_sections: RwLock::new(block_palettes.into_boxed_slice()),
-            random_tick_sections: RwLock::new(random_tick_sections),
-            randomly_ticking_mask: std::sync::atomic::AtomicU32::new(randomly_ticking_mask),
-            biome_sections: RwLock::new(biome_palettes.into_boxed_slice()),
+        let section = ChunkSections::from_palettes(
+            block_palettes.into_boxed_slice(),
+            biome_palettes.into_boxed_slice(),
             min_y,
-        };
-
-        let heightmaps = root_tag.get_compound("Heightmaps").map_or(
-            ChunkHeightmaps {
-                world_surface: None,
-                motion_blocking: None,
-                motion_blocking_no_leaves: None,
-            },
-            // A heightmap of the wrong length is dropped rather than stored:
-            // every reader indexes it by column and would run off the end.
-            |h_compound| ChunkHeightmaps {
-                world_surface: h_compound
-                    .get_long_array("WORLD_SURFACE")
-                    .filter(|a| a.len() == ChunkHeightmaps::LONGS)
-                    .map(|a| a.to_vec().into_boxed_slice()),
-                motion_blocking: h_compound
-                    .get_long_array("MOTION_BLOCKING")
-                    .filter(|a| a.len() == ChunkHeightmaps::LONGS)
-                    .map(|a| a.to_vec().into_boxed_slice()),
-                motion_blocking_no_leaves: h_compound
-                    .get_long_array("MOTION_BLOCKING_NO_LEAVES")
-                    .filter(|a| a.len() == ChunkHeightmaps::LONGS)
-                    .map(|a| a.to_vec().into_boxed_slice()),
-            },
         );
+
+        let mut heightmaps = ChunkHeightmaps::for_sections(section_count);
+        if let Some(compound) = root_tag.get_compound("Heightmaps") {
+            let packed_len = heightmaps.packed_len();
+            let read = |name| {
+                compound
+                    .get_long_array(name)
+                    .filter(|a| a.len() == packed_len)
+                    .map(|a| a.to_vec().into_boxed_slice())
+            };
+            heightmaps.world_surface = read("WORLD_SURFACE");
+            heightmaps.motion_blocking = read("MOTION_BLOCKING");
+            heightmaps.motion_blocking_no_leaves = read("MOTION_BLOCKING_NO_LEAVES");
+        }
         let mut block_ticks = Vec::new();
         if let Some(list) = root_tag.get_list("block_ticks") {
             for tag in list {
@@ -494,13 +479,6 @@ impl ChunkData {
     #[allow(clippy::too_many_lines)]
     pub fn internal_to_bytes(&self) -> Bytes {
         use pumpkin_nbt::tag::NbtTag;
-
-        fn extract_light_ref(light: Option<&LightContainer>) -> Option<&[u8]> {
-            match light {
-                Some(LightContainer::Full(data)) => Some(data.as_ref()),
-                _ => None,
-            }
-        }
 
         let is_light_correct = self
             .light_populated
@@ -631,13 +609,21 @@ impl ChunkData {
             section_comp.put_compound("biomes", b_comp);
 
             // block_light
-            if let Some(light_data) = extract_light_ref(light_lock.block_light.get(i)) {
+            if let Some(light_data) = light_lock
+                .block_light
+                .get(i)
+                .and_then(LightContainer::packed_bytes)
+            {
                 let bytes: Box<[i8]> = light_data.iter().map(|&x| x as i8).collect();
                 section_comp.put("BlockLight", NbtTag::ByteArray(bytes));
             }
 
             // sky_light
-            if let Some(light_data) = extract_light_ref(light_lock.sky_light.get(i)) {
+            if let Some(light_data) = light_lock
+                .sky_light
+                .get(i)
+                .and_then(LightContainer::packed_bytes)
+            {
                 let bytes: Box<[i8]> = light_data.iter().map(|&x| x as i8).collect();
                 section_comp.put("SkyLight", NbtTag::ByteArray(bytes));
             }
@@ -698,8 +684,6 @@ impl ChunkData {
 
     #[allow(clippy::too_many_lines)]
     pub fn internal_to_pump_bytes(&self) -> Bytes {
-        const PUMP_CHUNK_VERSION: u8 = 1;
-
         let is_light_correct = self.light_populated.load(Ordering::Relaxed);
         let block_entities_nbt = {
             let entities_guard = self
@@ -732,18 +716,25 @@ impl ChunkData {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
 
+        let heightmap_bits = ChunkHeightmaps::bits_for_sections(self.section.count);
+        let packed_len = ChunkHeightmaps::longs_for_bits(heightmap_bits);
+        let version = if heightmap_bits == ChunkHeightmaps::LEGACY_BITS {
+            1
+        } else {
+            2
+        };
         let ws = heightmap_lock
             .world_surface
             .as_deref()
-            .filter(|a| a.len() == ChunkHeightmaps::LONGS);
+            .filter(|a| a.len() == packed_len);
         let mb = heightmap_lock
             .motion_blocking
             .as_deref()
-            .filter(|a| a.len() == ChunkHeightmaps::LONGS);
+            .filter(|a| a.len() == packed_len);
         let mbnl = heightmap_lock
             .motion_blocking_no_leaves
             .as_deref()
-            .filter(|a| a.len() == ChunkHeightmaps::LONGS);
+            .filter(|a| a.len() == packed_len);
         let has_custom = !custom_data.is_empty();
 
         let mut flags = u8::from(is_light_correct);
@@ -775,7 +766,7 @@ impl ChunkData {
 
         let mut out = Vec::with_capacity(16 * 1024);
         out.extend_from_slice(&pump::PUMP_CHUNK_MAGIC);
-        out.put_u8(PUMP_CHUNK_VERSION);
+        out.put_u8(version);
         out.put_i32(WORLD_DATA_VERSION);
         out.put_i32(self.x);
         out.put_i32(self.z);
@@ -783,6 +774,10 @@ impl ChunkData {
         out.put_u8(status_u8);
         out.put_u8(flags);
         out.put_u64(self.inhabited_time.load(Ordering::Relaxed));
+
+        if version == 2 {
+            out.put_u8(heightmap_bits as u8);
+        }
 
         for hm in [ws, mb, mbnl].into_iter().flatten() {
             for &val in hm {
@@ -795,18 +790,14 @@ impl ChunkData {
             block_lock[i].write_pump_binary(&mut out);
             biome_lock[i].write_pump_binary(&mut out);
 
-            let bl = match light_lock.block_light.get(i) {
-                Some(LightContainer::Full(data)) if data.len() == LightContainer::ARRAY_SIZE => {
-                    Some(data.as_ref())
-                }
-                _ => None,
-            };
-            let sl = match light_lock.sky_light.get(i) {
-                Some(LightContainer::Full(data)) if data.len() == LightContainer::ARRAY_SIZE => {
-                    Some(data.as_ref())
-                }
-                _ => None,
-            };
+            let bl = light_lock
+                .block_light
+                .get(i)
+                .and_then(LightContainer::packed_bytes);
+            let sl = light_lock
+                .sky_light
+                .get(i)
+                .and_then(LightContainer::packed_bytes);
             let mut light_flags = 0u8;
             if bl.is_some() {
                 light_flags |= 1;
@@ -816,10 +807,10 @@ impl ChunkData {
             }
             out.put_u8(light_flags);
             if let Some(data) = bl {
-                out.extend_from_slice(data);
+                out.extend_from_slice(&data);
             }
             if let Some(data) = sl {
-                out.extend_from_slice(data);
+                out.extend_from_slice(&data);
             }
         }
 
@@ -879,7 +870,7 @@ impl ChunkData {
 
         let mut buf = &chunk_data[4..];
         let version = buf.get_u8();
-        if version != 1 {
+        if !matches!(version, 1 | 2) {
             return Err(ChunkParsingError::ErrorDeserializingChunk(format!(
                 "Unsupported pump chunk version {version}"
             )));
@@ -914,28 +905,40 @@ impl ChunkData {
         };
         let light_correct = (flags & 1) != 0;
 
+        let heightmap_bits = if version == 2 {
+            let bits = buf.try_get_u8().ok().map(usize::from);
+            let max_bits = ChunkHeightmaps::bits_for_sections(MAX_SECTIONS);
+            bits.filter(|&bits| (ChunkHeightmaps::LEGACY_BITS + 1..=max_bits).contains(&bits))
+                .ok_or_else(|| {
+                    ChunkParsingError::ErrorDeserializingChunk(
+                        "Invalid pump heightmap width".into(),
+                    )
+                })?
+        } else {
+            ChunkHeightmaps::LEGACY_BITS
+        };
+        let packed_len = ChunkHeightmaps::longs_for_bits(heightmap_bits);
         let read_heightmap =
             |buf: &mut &[u8], present: bool| -> Result<Option<Box<[i64]>>, ChunkParsingError> {
                 if !present {
                     return Ok(None);
                 }
-                if buf.remaining() < ChunkHeightmaps::LONGS * 8 {
+                if buf.remaining() < packed_len * 8 {
                     return Err(ChunkParsingError::ErrorDeserializingChunk(
                         "Unexpected EOF reading heightmap".into(),
                     ));
                 }
-                let mut hm = Vec::with_capacity(ChunkHeightmaps::LONGS);
-                for _ in 0..ChunkHeightmaps::LONGS {
+                let mut hm = Vec::with_capacity(packed_len);
+                for _ in 0..packed_len {
                     hm.push(buf.get_i64());
                 }
                 Ok(Some(hm.into_boxed_slice()))
             };
 
-        let heightmaps = ChunkHeightmaps {
-            world_surface: read_heightmap(&mut buf, (flags & (1 << 1)) != 0)?,
-            motion_blocking: read_heightmap(&mut buf, (flags & (1 << 2)) != 0)?,
-            motion_blocking_no_leaves: read_heightmap(&mut buf, (flags & (1 << 3)) != 0)?,
-        };
+        let mut heightmaps = ChunkHeightmaps::with_bits(heightmap_bits);
+        heightmaps.world_surface = read_heightmap(&mut buf, (flags & (1 << 1)) != 0)?;
+        heightmaps.motion_blocking = read_heightmap(&mut buf, (flags & (1 << 2)) != 0)?;
+        heightmaps.motion_blocking_no_leaves = read_heightmap(&mut buf, (flags & (1 << 3)) != 0)?;
 
         if buf.remaining() < 2 {
             return Err(ChunkParsingError::ErrorDeserializingChunk(
@@ -947,6 +950,12 @@ impl ChunkData {
             return Err(ChunkParsingError::ErrorDeserializingChunk(format!(
                 "Section count {section_count} exceeds maximum {MAX_SECTIONS}"
             )));
+        }
+
+        if version == 2 && heightmap_bits != ChunkHeightmaps::bits_for_sections(section_count) {
+            return Err(ChunkParsingError::ErrorDeserializingChunk(
+                "Pump heightmap width does not match section count".into(),
+            ));
         }
 
         let mut block_palettes = Vec::with_capacity(section_count);
@@ -992,16 +1001,11 @@ impl ChunkData {
             sky_lights.push(sky_light);
         }
 
-        let (random_tick_sections, randomly_ticking_mask) =
-            ChunkSections::build_random_tick_sections_cache(&block_palettes);
-        let section = ChunkSections {
-            count: block_palettes.len(),
-            block_sections: RwLock::new(block_palettes.into_boxed_slice()),
-            random_tick_sections: RwLock::new(random_tick_sections),
-            randomly_ticking_mask: std::sync::atomic::AtomicU32::new(randomly_ticking_mask),
-            biome_sections: RwLock::new(biome_palettes.into_boxed_slice()),
+        let section = ChunkSections::from_palettes(
+            block_palettes.into_boxed_slice(),
+            biome_palettes.into_boxed_slice(),
             min_y,
-        };
+        );
         let light_engine = ChunkLight {
             block_light: block_lights.into_boxed_slice(),
             sky_light: sky_lights.into_boxed_slice(),
@@ -1130,7 +1134,7 @@ impl ChunkData {
             NbtCompound::default()
         };
 
-        Ok(Self {
+        let chunk = Self {
             section,
             heightmap: std::sync::Mutex::new(heightmaps),
             x: position.x,
@@ -1145,7 +1149,14 @@ impl ChunkData {
             blending_data: None,
             inhabited_time: AtomicU64::new(inhabited_time),
             custom_data: std::sync::Mutex::new(custom_data),
-        })
+        };
+        if version == 1 && ChunkHeightmaps::bits_for_sections(section_count) > heightmap_bits {
+            *chunk
+                .heightmap
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = chunk.calculate_heightmap();
+        }
+        Ok(chunk)
     }
 
     pub fn set_custom_data(&self, namespace: &str, key: &str, value: pumpkin_nbt::tag::NbtTag) {
@@ -1351,6 +1362,18 @@ impl LightContainer {
     pub const DIM: usize = 16;
     pub const ARRAY_SIZE: usize = Self::DIM * Self::DIM * Self::DIM / 2;
 
+    /// Materialize nonzero uniform light for formats that store only nibble arrays.
+    #[must_use]
+    pub fn packed_bytes(&self) -> Option<Cow<'_, [u8]>> {
+        match self {
+            Self::Full(data) if data.len() == Self::ARRAY_SIZE => Some(Cow::Borrowed(data)),
+            Self::Empty(level) if *level != 0 => {
+                Some(Cow::Owned(vec![level << 4 | level; Self::ARRAY_SIZE]))
+            }
+            _ => None,
+        }
+    }
+
     #[must_use]
     pub fn new_empty(default: u8) -> Self {
         assert!(default <= 15, "Default value must be between 0 and 15");
@@ -1464,6 +1487,61 @@ mod tests {
     use pumpkin_data::Block;
     use pumpkin_nbt::compound::NbtCompound;
     use pumpkin_nbt::tag::NbtTag;
+
+    #[test]
+    fn tall_chunk_round_trips_heightmaps_and_light_in_both_formats() {
+        use crate::chunk::ChunkHeightmapType;
+
+        let chunk = ChunkData::empty_with_sections(0, 0, 64, -512);
+        chunk.set_block_absolute_y(0, -512, 0, Block::STONE.default_state.id);
+        chunk.set_block_absolute_y(15, 511, 15, Block::GRASS_BLOCK.default_state.id);
+        assert_eq!(
+            chunk
+                .section
+                .random_tick_section_indices()
+                .collect::<Vec<_>>(),
+            [63]
+        );
+        assert_eq!(chunk.section.get_block_absolute_y(0, -513, 0), None);
+        assert_eq!(chunk.section.get_block_absolute_y(15, 512, 15), None);
+        let mut light = chunk.light_engine.lock().unwrap();
+        light.sky_light = vec![LightContainer::Empty(15); 64].into_boxed_slice();
+        light.block_light = vec![LightContainer::Empty(0); 64].into_boxed_slice();
+        light.block_light[63] = LightContainer::Full(vec![0x77; 2048].into_boxed_slice());
+        drop(light);
+
+        let pump = chunk.internal_to_pump_bytes();
+        assert_eq!(pump[4], 2);
+        assert_eq!(ChunkData::empty(0, 0).internal_to_pump_bytes()[4], 1);
+        for bytes in [chunk.internal_to_bytes(), pump] {
+            let loaded = ChunkData::internal_from_bytes(&bytes, Vector2::new(0, 0)).unwrap();
+            assert_eq!((loaded.section.min_y, loaded.section.count), (-512, 64));
+            assert_eq!(
+                loaded.section.get_block_absolute_y(0, -512, 0),
+                Some(Block::STONE.default_state.id)
+            );
+            assert_eq!(
+                loaded.section.get_block_absolute_y(15, 511, 15),
+                Some(Block::GRASS_BLOCK.default_state.id)
+            );
+            assert_eq!(
+                loaded
+                    .section
+                    .random_tick_section_indices()
+                    .collect::<Vec<_>>(),
+                [63]
+            );
+            let heightmaps = loaded.heightmap.lock().unwrap();
+            assert_eq!(heightmaps.world_surface.as_ref().unwrap().len(), 52);
+            let map = ChunkHeightmapType::WorldSurface;
+            assert_eq!(heightmaps.get(map, 0, 0, -512), -512);
+            assert_eq!(heightmaps.get(map, 15, 15, -512), 511);
+            assert_eq!(heightmaps.get(map, 0, 1, -512), -513);
+            let light = loaded.light_engine.lock().unwrap();
+            assert_eq!(light.sky_light[63].get(15, 15, 15), 15);
+            assert_eq!(light.block_light[63].get(15, 15, 15), 7);
+        }
+    }
 
     fn test_section(y: i32, block: &str, with_biomes: bool) -> NbtCompound {
         let mut block_states = NbtCompound::new();

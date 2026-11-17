@@ -15,7 +15,7 @@ impl Carver for CanyonCarver {
         random: &mut RandomGenerator,
         chunk_pos: &Vector2<i32>,
         carver_chunk_pos: &Vector2<i32>,
-        min_gen_y: i8,
+        min_gen_y: i16,
         gen_depth: u16,
         legacy_random_source: bool,
     ) {
@@ -64,7 +64,7 @@ impl CanyonCarver {
         config: &CarverConfig,
         chunk_pos: Vector2<i32>,
         output: &mut dyn CarverOutput,
-        min_gen_y: i8,
+        min_gen_y: i16,
         gen_depth: u16,
         tunnel_seed: i64,
         mut x: f64,

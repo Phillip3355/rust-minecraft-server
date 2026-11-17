@@ -982,7 +982,7 @@ impl JigsawGenerator {
 
         let start_y = if let Some(s) = structure {
             s.start_height.map_or(context.sea_level, |hp| {
-                hp.get(&mut context.random, context.min_y as i8, context.height)
+                hp.get(&mut context.random, context.min_y as i16, context.height)
             })
         } else {
             context.sea_level

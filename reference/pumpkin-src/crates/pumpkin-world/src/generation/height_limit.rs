@@ -5,7 +5,7 @@ use super::section_coords;
 pub trait HeightLimitView {
     fn height(&self) -> u16;
 
-    fn bottom_y(&self) -> i8;
+    fn bottom_y(&self) -> i16;
 
     fn top_y(&self) -> u16 {
         if self.bottom_y() >= 0 {
@@ -54,7 +54,7 @@ impl HeightLimitView for ProtoChunk {
         self.height()
     }
 
-    fn bottom_y(&self) -> i8 {
+    fn bottom_y(&self) -> i16 {
         self.bottom_y()
     }
 }

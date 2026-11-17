@@ -74,7 +74,7 @@ impl StructureGenerator for NetherFossilGenerator {
             .map(|key| pumpkin_data::structures::Structure::get(&key));
 
         let initial_y = if let Some(hp) = structure.and_then(|s| s.start_height) {
-            hp.get(&mut context.random, context.min_y as i8, context.height)
+            hp.get(&mut context.random, context.min_y as i16, context.height)
         } else {
             let height_range = HEIGHT_MAX - HEIGHT_MIN + 1;
             HEIGHT_MIN + context.random.next_bounded_i32(height_range)

@@ -85,7 +85,7 @@ impl PlacedFeature {
         &self,
         chunk: &mut T,
         block_registry: &dyn WorldPortalExt,
-        min_y: i8,
+        min_y: i16,
         height: u16,
         feature_name: pumpkin_data::placed_feature::PlacedFeature, // This placed feature
         random: &mut RandomGenerator,
@@ -190,7 +190,7 @@ impl PlacementModifier {
         &self,
         chunk: &T,
         block_registry: &dyn WorldPortalExt,
-        min_y: i8,
+        min_y: i16,
         height: u16,
         feature: pumpkin_data::placed_feature::PlacedFeature,
         random: &mut RandomGenerator,
@@ -537,7 +537,7 @@ pub struct HeightRangePlacementModifier {
 impl HeightRangePlacementModifier {
     pub fn get_positions(
         &self,
-        min_y: i8,
+        min_y: i16,
         height: u16,
         random: &mut RandomGenerator,
         pos: BlockPos,
@@ -556,7 +556,7 @@ impl HeightmapPlacementModifier {
     pub fn get_positions<T: GenerationCache>(
         &self,
         chunk: &T,
-        min_y: i8,
+        min_y: i16,
         _height: u16,
         _random: &mut RandomGenerator,
         pos: BlockPos,

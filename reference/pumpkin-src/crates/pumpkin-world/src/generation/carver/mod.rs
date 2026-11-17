@@ -56,7 +56,7 @@ impl CarverBlockIds {
 }
 
 pub struct CarvingContext<'a> {
-    pub min_y: i8,
+    pub min_y: i16,
     pub height: u16,
     pub random_config: &'a GlobalRandomConfig,
     pub surface_noise: &'a DoublePerlinNoiseSampler,
@@ -195,7 +195,7 @@ pub trait Carver {
         random: &mut RandomGenerator,
         chunk_pos: &Vector2<i32>,
         carver_chunk_pos: &Vector2<i32>,
-        min_gen_y: i8,
+        min_gen_y: i16,
         gen_depth: u16,
         legacy_random_source: bool,
     );
@@ -318,7 +318,7 @@ pub fn carve(chunk: &mut ProtoChunk, generator: &VanillaGenerator) {
         });
 
         let mut context = CarvingContext {
-            min_y: generator.dimension.min_y as i8,
+            min_y: generator.dimension.min_y as i16,
             height: generator.dimension.logical_height as u16,
             random_config: &generator.random_config,
             surface_noise: &generator.terrain_cache.surface_noise,
@@ -529,7 +529,7 @@ fn with_carve_run_options<F>(
         )
     });
     let mut context = CarvingContext {
-        min_y: generator.dimension.min_y as i8,
+        min_y: generator.dimension.min_y as i16,
         height: generator.dimension.logical_height as u16,
         random_config: &generator.random_config,
         surface_noise: &generator.terrain_cache.surface_noise,

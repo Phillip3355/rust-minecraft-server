@@ -32,7 +32,7 @@ pub mod rule;
 pub mod terrain;
 
 pub struct MaterialRuleContext<'a> {
-    pub min_y: i8,
+    pub min_y: i16,
     pub height: u16,
     pub random_deriver: &'a XoroshiroSplitter,
     pub legacy_random_source: bool,
@@ -132,7 +132,7 @@ impl VeinContext<'_> {
 impl<'a> MaterialRuleContext<'a> {
     #[expect(clippy::too_many_arguments)]
     pub const fn new(
-        min_y: i8,
+        min_y: i16,
         height: u16,
         random_deriver: &'a XoroshiroSplitter,
         legacy_random_source: bool,

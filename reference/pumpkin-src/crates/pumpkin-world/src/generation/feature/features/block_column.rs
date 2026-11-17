@@ -28,7 +28,7 @@ impl BlockColumnFeature {
         &self,
         chunk: &mut T,
         block_registry: &dyn WorldPortalExt,
-        _min_y: i8,
+        _min_y: i16,
         _height: u16,
         _feature: pumpkin_data::placed_feature::PlacedFeature,
         random: &mut RandomGenerator,

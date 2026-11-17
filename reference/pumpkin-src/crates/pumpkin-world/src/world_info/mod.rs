@@ -604,6 +604,8 @@ impl LevelData {
 
 #[derive(Error, Debug)]
 pub enum WorldInfoError {
+    #[error("Experimental worldgen profile {0} has no compiled generator")]
+    UnavailableWorldgenProfile(String),
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
     #[error("Info not found!")]

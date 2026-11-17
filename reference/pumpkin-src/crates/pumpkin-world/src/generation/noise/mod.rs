@@ -223,7 +223,7 @@ impl<'a> ChunkNoiseGenerator<'a> {
 
     #[inline]
     #[must_use]
-    pub const fn min_y(&self) -> i8 {
+    pub const fn min_y(&self) -> i16 {
         self.generation_shape.min_y
     }
 

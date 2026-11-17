@@ -185,7 +185,7 @@ impl ToTokens for ParameterPointStruct {
 /// Deserialized noise-shape configuration controlling terrain cell dimensions.
 #[derive(Deserialize, Clone)]
 pub struct GenerationShapeConfigStruct {
-    pub min_y: i8,
+    pub min_y: i16,
     pub height: u16,
     #[serde(default)]
     pub size_horizontal: u8,
@@ -343,7 +343,7 @@ pub fn build() -> TokenStream {
 
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         pub struct GenerationShapeConfig {
-            pub min_y: i8,
+            pub min_y: i16,
             pub height: u16,
             pub size_horizontal: u8,
             pub size_vertical: u8,
@@ -368,7 +368,7 @@ pub fn build() -> TokenStream {
             }
 
             #[must_use]
-            pub fn trim_height(&self, bottom_y: i8, top_y: u16) -> Self {
+            pub fn trim_height(&self, bottom_y: i16, top_y: u16) -> Self {
                 let new_min = self.min_y.max(bottom_y);
                 let this_top = if self.min_y >= 0 {
                     self.height + self.min_y as u16

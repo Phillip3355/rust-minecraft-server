@@ -16,7 +16,7 @@ impl TwistingVinesFeature {
     pub fn generate<T: GenerationCache>(
         &self,
         chunk: &mut T,
-        _min_y: i8,
+        _min_y: i16,
         _height: u16,
         _feature_name: pumpkin_data::placed_feature::PlacedFeature,
         random: &mut RandomGenerator,

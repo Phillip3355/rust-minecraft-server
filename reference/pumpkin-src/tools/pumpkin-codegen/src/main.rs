@@ -107,6 +107,7 @@ mod villager;
 mod wit;
 mod wolf_variant;
 mod world_event;
+mod worldgen_profile;
 
 /// Output directory where all generated Rust source files are written.
 pub const OUT_DIR: &str = "../../crates/pumpkin-data/src/generated";
@@ -115,6 +116,27 @@ pub const OUT_DIR: &str = "../../crates/pumpkin-data/src/generated";
 /// and writes their output to [`OUT_DIR`].
 pub fn main() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let filters: Vec<String> = std::env::args().skip(1).collect();
+    if filters
+        .first()
+        .is_some_and(|arg| arg == "stage-worldgen-profile")
+    {
+        let [_, output] = filters.as_slice() else {
+            eprintln!("Usage: pumpkin-codegen stage-worldgen-profile OUTPUT_DIRECTORY");
+            std::process::exit(2);
+        };
+        let packs = manifest_dir.join("../../../datapacks");
+        if let Err(error) = worldgen_profile::stage(
+            &manifest_dir.join("../../assets/datapack"),
+            &packs.join("Terralith"),
+            &packs.join("Incendium"),
+            &std::path::absolute(output).expect("Cannot resolve profile output path"),
+        ) {
+            eprintln!("Worldgen profile staging failed: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     std::env::set_current_dir(manifest_dir).expect("Failed to set current dir to manifest dir");
 
     let mc_data_dir = std::path::Path::new("../../assets/datapack/data/minecraft");
@@ -239,7 +261,6 @@ pub fn main() {
 
     // If any arguments are given, treat them as file-stem filters.
     // e.g. `cargo run -- chest_loot` only regenerates chest_loot.rs.
-    let filters: Vec<String> = std::env::args().skip(1).collect();
     if filters.iter().any(|f| f == "wit") {
         wit::v0_2::main();
         return;

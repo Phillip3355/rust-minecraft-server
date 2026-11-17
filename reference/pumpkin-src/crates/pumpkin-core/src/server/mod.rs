@@ -178,6 +178,13 @@ impl Server {
         vanilla_data: VanillaData,
         plugin_loaders: Vec<Arc<dyn PluginLoader>>,
     ) -> Result<Arc<Self>, WorldInfoError> {
+        let worldgen = &advanced_config.experimental.worldgen;
+        if worldgen.enabled {
+            return Err(WorldInfoError::UnavailableWorldgenProfile(
+                worldgen.profile.clone(),
+            ));
+        }
+
         let permission_manager = Arc::new(PermissionManager::new());
         // First register the default commands. After that, plugins can put in their own.
         let command_dispatcher = ArcSwap::from_pointee(default_dispatcher(

@@ -87,8 +87,8 @@ impl HeightLimitView for WorldGenerationCache {
         self.world.dimension.height as u16
     }
 
-    fn bottom_y(&self) -> i8 {
-        self.world.dimension.min_y as i8
+    fn bottom_y(&self) -> i16 {
+        self.world.dimension.min_y as i16
     }
 }
 

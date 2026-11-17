@@ -239,8 +239,11 @@ impl Chunk {
         ChunkSections::from_palettes(block_sections, biome_sections, dimension.min_y)
     }
 
-    fn build_level_heightmaps(proto_chunk: &ProtoChunk, min_y: i32) -> ChunkHeightmaps {
-        let mut heightmaps = ChunkHeightmaps::default();
+    fn build_level_heightmaps(
+        proto_chunk: &ProtoChunk,
+        sections: &ChunkSections,
+    ) -> ChunkHeightmaps {
+        let mut heightmaps = ChunkHeightmaps::for_sections(sections.count);
         for x in 0..16 {
             for z in 0..16 {
                 let source_index = x * 16 + z;
@@ -258,7 +261,13 @@ impl Chunk {
                         proto_chunk.flat_motion_blocking_no_leaves_height_map[source_index],
                     ),
                 ] {
-                    heightmaps.set(heightmap_type, x as i32, z as i32, i32::from(height), min_y);
+                    heightmaps.set(
+                        heightmap_type,
+                        x as i32,
+                        z as i32,
+                        i32::from(height),
+                        sections.min_y,
+                    );
                 }
             }
         }
@@ -298,7 +307,7 @@ impl Chunk {
         let proto_chunk = *proto_chunk_box;
 
         let sections = Self::build_level_sections(&proto_chunk, dimension);
-        let heightmaps = Self::build_level_heightmaps(&proto_chunk, dimension.min_y);
+        let heightmaps = Self::build_level_heightmaps(&proto_chunk, &sections);
 
         // Move the light data instead of cloning it
         // By taking ownership of proto_chunk, we can move the light data directly

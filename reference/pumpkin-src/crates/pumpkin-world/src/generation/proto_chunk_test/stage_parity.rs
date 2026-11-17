@@ -328,7 +328,7 @@ impl crate::generation::height_limit::HeightLimitView for TestGridCache {
     fn height(&self) -> u16 {
         384
     }
-    fn bottom_y(&self) -> i8 {
+    fn bottom_y(&self) -> i16 {
         -64
     }
 }

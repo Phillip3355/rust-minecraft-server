@@ -18,7 +18,7 @@ impl BlockPileFeature {
         &self,
         chunk: &mut T,
         block_registry: &dyn WorldPortalExt,
-        min_y: i8,
+        min_y: i16,
         _height: u16,
         _feature: pumpkin_data::placed_feature::PlacedFeature,
         random: &mut RandomGenerator,
