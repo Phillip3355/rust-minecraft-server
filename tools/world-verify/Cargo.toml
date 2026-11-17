@@ -1,0 +1,20 @@
+[package]
+name = "world-verify"
+version = "0.1.0"
+edition = "2021"
+description = "Phase 1 offline integrity verifier for Anvil worlds written by Pumpkin (chunk corruption, player data loss, item duplication, save/reload diff)"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# Intentionally ZERO external dependencies: the Phase 1 sandbox has no network
+# access to crates.io, so this tool must build with `cargo build --offline`
+# from a clean checkout. zlib/gzip inflate, LZ4 (lz4-java block stream),
+# CRC32, Adler-32, XXH32 and NBT are implemented in-tree.
+[dependencies]
+
+[[bin]]
+name = "world-verify"
+path = "src/main.rs"
+
+[profile.release]
+debug = 1

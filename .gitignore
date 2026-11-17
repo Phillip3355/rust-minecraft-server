@@ -1,3 +1,4 @@
 /.work/
+/tools/world-verify/target/
 __pycache__/
 *.py[cod]

@@ -1,0 +1,75 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running unittests src/lib.rs (tools/world-verify/target/debug/build/world-verify/aac28a1fd7b22124/out/world_verify-aac28a1fd7b22124)
+
+running 24 tests
+test anvil::tests::ceil_log2_values ... ok
+test anvil::tests::region_name_parsing ... ok
+test compress::tests::adler32_known_vector ... ok
+test anvil::tests::unpack_non_spanning ... ok
+test compress::tests::crc32_known_vector ... ok
+test compress::tests::gzip_detects_payload_corruption ... ok
+test compress::tests::lz4_literal_and_match ... ok
+test compress::tests::xxh32_known_vectors ... ok
+test compress::tests::zlib_detects_checksum_corruption ... ok
+test compress::tests::output_limit_enforced ... ok
+test items::tests::conservation ... ok
+test items::tests::invalid_counts_flagged ... ok
+test compress::tests::lz4_java_stream_roundtrip_and_checksum ... ok
+test items::tests::nested_shulker_and_default_count ... ok
+test nbt::tests::eq_ignoring_keys ... ok
+test nbt::tests::rejects_duplicate_keys ... ok
+test nbt::tests::rejects_trailing_bytes_and_huge_lengths ... ok
+test report::tests::json_escaping ... ok
+test nbt::tests::roundtrip ... ok
+test report::tests::report_counts ... ok
+test world::tests::uuid_check ... ok
+test nbt::tests::rejects_truncation_everywhere ... ok
+test nbt::tests::depth_limit ... ok
+test compress::tests::stored_roundtrip_zlib_gzip ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/main.rs (tools/world-verify/target/debug/build/world-verify/a3f63a67d4a45a7f/out/world_verify-a3f63a67d4a45a7f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/regression.rs (tools/world-verify/target/debug/build/world-verify/0a835dd51c3647a1/out/regression-0a835dd51c3647a1)
+
+running 26 tests
+test corrupt_level_dat_detected ... ok
+test crash_truncated_header_detected ... ok
+test chunk_loss_detected_by_diff ... ok
+test chunk_coordinate_mismatch_detected ... ok
+test crash_truncated_region_detected ... ok
+test clean_world_all_compressions_have_no_errors ... ok
+test item_loss_is_warning_by_default_error_when_strict ... ok
+test duplicate_inventory_slot_detected ... ok
+test block_change_across_reload_detected_in_strict_mode_only ... ok
+test item_duplication_detected_by_conservation ... ok
+test bitflip_in_compressed_chunk_detected_for_checksummed_formats ... ok
+test cli_exit_codes ... ok
+test palette_index_out_of_range_detected ... ok
+test missing_level_dat_detected ... ok
+test overlapping_sectors_detected ... ok
+test overstacked_item_detected ... ok
+test item_totals_match_fixture_contents ... ok
+test item_move_between_container_and_player_is_conserved ... ok
+test non_finite_position_detected ... ok
+test identical_save_reload_strict_diff_is_clean ... ok
+test truncated_player_file_detected ... ok
+test verifier_never_panics_on_garbage_region ... ok
+test player_data_loss_detected_by_diff ... ok
+test seed_change_detected ... ok
+test recompression_is_not_a_change ... ok
+test player_inventory_change_across_reload_detected_in_strict_mode ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+   Doc-tests world_verify
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
