@@ -1,0 +1,5 @@
+Started: 2026-11-17T12:56:26Z
+Pinned source: https://github.com/Pumpkin-MC/Pumpkin.git @ eda69440e6369c5f8a05c3f69fc809c40dab93a6 (0.2.2+26.3-26.60)
+Cloning into '/home/phillip/.local/state/hermes-orchestrator/worktrees/2499126e536f4e04b58eb4821497f0b7/.work/pumpkin'...
+fatal: unable to access 'https://github.com/Pumpkin-MC/Pumpkin.git/': Could not resolve host: github.com
+Result: exit=128 phase=prepare; evidence: /home/phillip/.local/state/hermes-orchestrator/worktrees/2499126e536f4e04b58eb4821497f0b7/.work/build-JeIqGcf2
