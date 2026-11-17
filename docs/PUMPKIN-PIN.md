@@ -55,3 +55,11 @@ tools/pumpkin-codegen, tools/pumpkin-fuzzer, tools/pumpkin-tester
 새 릴리스 선택 시 릴리스 URL·전체 SHA·MSRV·workspace·Cargo.lock을 다시 확인하고
 pin 파일과 이 문서를 함께 변경한다. 별도 체크아웃에서 빌드하고 기존 기준선의
 로그를 보존한다. 호환성 검증과 실측 결과를 확보한 뒤 채택한다.
+
+## 2026-11-17 빌드 재시도
+
+고정 SHA·toolchain·타깃은 변경하지 않았다. 실제 `scripts/build.sh` 재실행은
+소스 클론에서 종료 코드 128로 실패했다. 실행 세션의 네트워크 소켓 차단을
+확인했으며 Cargo에는 도달하지 못했다. 따라서 바이너리 이름·기본 feature·
+네이티브 의존성의 충분성은 여전히 미검증이다. 시간과 증거는
+[BUILD-VALIDATION.md](BUILD-VALIDATION.md)에 기록했다.

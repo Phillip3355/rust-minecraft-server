@@ -1,0 +1,51 @@
+$ date -u +%FT%TZ
+2026-11-17T13:13:47Z
+exit_code=0
+
+$ uname -srmo
+Linux 7.0.0-28-generic x86_64 GNU/Linux
+exit_code=0
+
+$ rustup toolchain list
+stable-x86_64-unknown-linux-gnu (active, default)
+exit_code=0
+
+$ rustc -Vv
+rustc 1.100.0 (0ef1bc386 2026-11-09)
+binary: rustc
+commit-hash: 0ef1bc386059596dada8fb65b50425aab2ea637a
+commit-date: 2026-11-09
+host: x86_64-unknown-linux-gnu
+release: 1.100.0
+LLVM version: 23.1.5
+exit_code=0
+
+$ cargo -V
+cargo 1.100.0 (3acc79c0c 2026-11-05)
+exit_code=0
+
+$ rustup run 1.100.0 rustc -V
+error: toolchain '1.100.0-x86_64-unknown-linux-gnu' is not installed
+help: run `rustup toolchain install 1.100.0-x86_64-unknown-linux-gnu` to install it
+exit_code=1
+
+$ getent hosts github.com
+exit_code=2
+
+$ curl -I --connect-timeout 10 https://github.com
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0curl: (6) Could not resolve host: github.com
+exit_code=6
+
+$ bash -n scripts/build.sh
+exit_code=0
+
+$ ./scripts/build.sh --help
+Usage: ./scripts/build.sh [SOURCE_DIRECTORY]
+Default source: PROJECT/.work/pumpkin; logs/artifacts: PROJECT/.work/build-*
+exit_code=0
+
+DNS stub UDP: PermissionError(1, 'Operation not permitted')
+HTTPS TCP: PermissionError(1, 'Operation not permitted')
