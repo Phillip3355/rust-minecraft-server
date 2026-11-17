@@ -1,8 +1,8 @@
 # Rust 기반 초경량 Minecraft 서버 개발 계획서
 
-> **문서 버전:** v1.1  
+> **문서 버전:** v1.2<br>
 > **작성 기준일:** 2026-11-17  
-> **기준 게임 버전:** Minecraft Java Edition 26.3 ("Wilderness Bound" 기준, 업그레이드 가능한 구조; Bedrock 1.26.x 추적)  
+> **기준 게임 버전:** Minecraft Java Edition 26.3 ("Wilderness Bound" 기준, 업그레이드 가능한 구조; 서버와 일치하는 Java 버전 및 최신 Bedrock 릴리즈 지원)<br>
 > **프로젝트 유형:** Pumpkin 기반 Rust 서버 포크 및 확장  
 > **개발 원칙:** 호환성 검증 → 기능 구현 → 정확성 검증 → 프로파일링 → 최적화
 
@@ -14,16 +14,17 @@ Rust 기반 Minecraft 서버인 **Pumpkin**을 포크하여, 기존 Java 서버�
 
 핵심 목표:
 
-1. **Java + Bedrock 크로스플레이:** 동일 월드·좌표·게임 규칙 아래 두 에디션이 함께 플레이.
+1. **Java + Bedrock 크로스플레이:** 동일 월드·좌표·게임 규칙 아래 두 에디션이 함께 플레이. Java는 서버와 일치하는 버전만, Bedrock은 항상 최신 릴리즈만 지원.
 2. **Paper/Bukkit 플러그인 지원:** PatchBukkit 기반의 검증된 플러그인 우선 호환(단, JVM 메모리·동기화 제약을 분리 관리).
 3. **데이터팩 지원:** 일반 데이터팩부터 월드 생성형 데이터팩까지 단계적으로 확장.
 4. **고품질 차원:** Terralith(오버월드), Incendium(네더) 우선; Nullscape(엔드)는 높이·Bedrock 제약 때문에 선택적 지원.
-5. **Extreme Worldgen:** 선택형 초고도 오버월드 생성(기본 설계 Y=-512~511, 높이 1,024블록, 새 월드 전용·기본값 OFF).
+5. **Extreme Worldgen:** 선택형 초고도 오버월드 생성(Y=-512~511 전 범위 실제 활용, 높이 1,024블록, 새 월드 전용·기본값 OFF). Terralith 특수 바이옴을 유지하면서 전체 범위를 확보하는 것이 최선의 목표.
 6. **최적화:** 메모리, 청크 생성/저장, 월드 틱, 네트워크, 멀티코어 활용 개선.
 7. **운영 안정성:** 자동 백업, 장애 복구, 성능 모니터링, 버전별 회귀 테스트.
 
 ### 1.2 범위 제외(초기 버전)
 
+- 서버와 일치하지 않는 하위 Java 버전 및 최신 릴리즈보다 오래된 Bedrock 버전 지원.
 - 기존 Fabric/Forge 모드 `.jar` 직접 실행.
 - 모든 Paper 플러그인의 100% 호환 보장.
 - Bedrock 클라이언트의 물리적인 렌더링/차원 높이 제한 완전 제거(클라이언트·프로토콜 고유 한계).
@@ -37,8 +38,8 @@ Rust 기반 Minecraft 서버인 **Pumpkin**을 포크하여, 기존 Java 서버�
 | 코어 | Pumpkin (Rust) 포크 | 2026년 8~9월 Beta 진입; Tokio(비동기 I/O) + Rayon(병렬 틱/월드생성) 기반 멀티스레드 코어. 실제 `crates/` 구성은 고정 커밋의 `Cargo.toml`에서 최종 확인 |
 | 기본 확장 | Pumpkin WebAssembly 플러그인 | `Wasmtime` + `WIT` 기반 샌드박스(`.wasm`). Rust·Python·C#·Go·TypeScript 등 다언어 지원. 신규 기능은 가능하면 JVM 없이 구현 |
 | Paper 호환 | PatchBukkit + 내장 JVM (Java 25+) | 2026년 10월 아키텍처 전환으로 **런타임에 Paperclip 기반 헤드리스(headless) Paper를 구동**하고 JNI/FFM + Protobuf 브리지로 실제 CraftBukkit/NMS 연결. **WIP(프로덕션 미성숙)** 상태이며 **전체 JVM + Paper 메모리를 점유**하므로 순수 Rust 모드와 혼동 금지 |
-| Java 접속 | Pumpkin Java 프로토콜 | Java 26.3 지원 확인; 바닐라 메커니즘 1:1 동등성은 지속 검증 필요 |
-| Bedrock 접속 | Pumpkin 내장 Bedrock 프로토콜 | **RakNet / NetherNet** 전송 계층을 코어에 내장하나 **실험적/WIP 상태**; 기능 동등성·고도 처리 별도 실측 필수 |
+| Java 접속 | Pumpkin Java 프로토콜 | 서버와 일치하는 Java 버전만 지원(가능하면 최신 서버 버전 사용); 26.3 지원 확인; 바닐라 메커니즘 1:1 동등성은 지속 검증 필요 |
+| Bedrock 접속 | Pumpkin 내장 Bedrock 프로토콜 | 최신 Bedrock 릴리즈만 지원. **RakNet / NetherNet** 전송 계층을 코어에 내장하나 **실험적/WIP 상태**; 기능 동등성·고도 처리 별도 실측 필수 |
 | Bedrock 대안 | 독립형 Geyser 프록시 | 내장 Bedrock 계층에서 오류·미구현이 발생할 때 비교·우회 경로로 시험 |
 | 데이터팩 | Dynamic Registry Manager + 런타임 데이터팩 로더 + Worldgen 확장 | 바닐라 데이터(`assets/datapacks/<version>/`) 및 `Pumpkin-MC/Extractor` + `pumpkin-codegen` 파이프라인 활용. 커스텀 월드젠/데이터팩 완전 실행은 미검증 |
 | 영속화 | `Anvil (.mca)` 명시 설정 우선 | **주의:** Pumpkin 기본 청크 포맷은 자체 `.pump` (`[world.chunk] type = "pump"`)이며 `anvil`, `linear`를 함께 지원함. Paper 호환 및 무손상 백업/롤백을 위해 `pumpkin.toml`에서 `type = "anvil"`을 명시적으로 우선 사용 |
@@ -79,8 +80,8 @@ Rust 기반 Minecraft 서버인 **Pumpkin**을 포크하여, 기존 Java 서버�
 
 ### P0 — 반드시 필요한 핵심
 
-- Java Edition 26.3 접속, 온라인 인증, 저장/불러오기, 재접속(26.3 기본 `white-list=true` 동작 반영).
-- Bedrock Edition 접속, 블록 배치/파괴, 인벤토리, 이동, 차원 이동.
+- 서버 버전과 일치하는 Java Edition 접속(기준 26.3, 가능하면 최신 서버 버전), 온라인 인증, 저장/불러오기, 재접속(26.3 기본 `white-list=true` 동작 반영).
+- 최신 릴리즈 Bedrock Edition 접속(하위 버전 미지원), 블록 배치/파괴, 인벤토리, 이동, 차원 이동.
 - 바닐라 생존 핵심 루프(채집·제작·전투·허기·네더/엔드 포털·기본 레드스톤/컨테이너) 및 플레이어 데이터 무결성.
 - 데이터팩 목록 확인, 유효성 검사, 로딩 실패 원인 진단 로그.
 - 서버 콘솔, 로그, MSMP/SIGTERM 안전 종료, `Anvil` 기반 백업/복원.
@@ -99,7 +100,7 @@ Rust 기반 Minecraft 서버인 **Pumpkin**을 포크하여, 기존 Java 서버�
 
 ### P2 — 차별화 기능
 
-- 관리자 설정형 Extreme Worldgen (`experimental_extreme_worldgen`).
+- 관리자 설정형 Extreme Worldgen (`experimental_extreme_worldgen`): Terralith 특수 바이옴 유지와 Y=-512~511 전 범위 실제 활용의 동시 달성.
 - 비동기 청크 생성 작업 큐 및 플레이어 주변 청크 우선순위.
 - 선택적 월드 사전 생성(pregeneration), 청크 캐시, 메모리 상한.
 - 시드 재현성과 지형 생성 결정성(determinism) 검증.
@@ -125,17 +126,18 @@ Rust 기반 Minecraft 서버인 **Pumpkin**을 포크하여, 기존 Java 서버�
 enabled = false
 min_y = -512
 height = 1024
-reference_surface_y = -200
-target_peak_y = 400
-sea_level = -180
+reference_surface_y = -300
+target_peak_y = 500
+sea_level = -300
 max_generation_threads = 4
 ```
 
 - 설정된 블록 Y 범위: **-512 ~ 511**, 총 **1,024블록**(Geyser 문서 기준 오버월드 Bedrock 경계인 -512~512 범위와 정합).
-- 기준 지면 Y=-200부터 산 정상 Y=400까지의 **고도차는 600블록**.
+- 기준 지면 Y=-300에서 산은 최대 800블록 솟아 정상 Y=500 부근에 도달한다. 지하는 일반 야생 수준의 깊이를 유지하고 산이 극단적으로 높은 재미를 추구한다.
+- `sea_level = -300`은 새 지면 기준에 맞춘 개념 예시이며, 실제 해수면과 지하 깊이는 생성 결과를 검증하며 조정한다.
 - 16블록 청크 섹션 기준: 24개(기본 오버월드 384블록) → 64개(확장 1,024블록).
-- 고도차가 600블록인 모든 지형을 강제로 생성하지 않음. 산맥 분포와 동굴 깊이는 별도 매개변수로 설계.
-- 단순 Y 좌표 확대만으로 Terralith와 완벽히 호환되지 않으므로 **별도 월드 생성 프리셋**으로 구현.
+- 모든 지형을 최대 고도차 800블록으로 강제하지 않는다. 산맥 분포와 일반 야생 수준의 동굴 깊이를 별도 설계하고, 생성 지형이 전체 Y=-512~511 범위를 실제로 활용하도록 검증한다.
+- 단순 Y 좌표 확대만으로 Terralith와 완벽히 호환되지 않으므로 **별도 월드 생성 프리셋**으로 구현한다. Terralith 특수 바이옴 보존과 전체 높이 범위 확보의 동시 달성이 최선의 목표이며 실측 검증이 필요하다.
 - 고도 범위 변경 시 레지스트리(`dimension_type`, `noise_settings`), 지형 노이즈, 대수층(aquifer), 광물 배치, 월드 표면, 구조물 Y 경계, 하이트맵, 조명(skylight/blocklight), 생성 범위, 직렬화 및 Java/Bedrock 클라이언트 동기화를 함께 검증.
 - **새 월드에서만 활성화**하며, 운영 도중 높이 설정을 바꾸는 기능은 초기 범위에서 제외.
 
@@ -143,7 +145,7 @@ max_generation_threads = 4
 
 | 차원 | 기본 높이/특성 | 1차 목표 | 2차 목표 | 실패 시 전략 |
 |---|---|---|---|---|
-| 오버월드 | Terralith 기본 구성(`min_y=-64`, `height=384`, Y `-64..319`) | Terralith 기본 높이 정확성 검증 | Extreme Worldgen 별도 프리셋(`-512..511`, 64섹션) | 일반 바닐라 지형 유지 |
+| 오버월드 | Terralith 기본 구성(`min_y=-64`, `height=384`, Y `-64..319`) | Terralith 기본 높이 정확성 검증 | Terralith 특수 바이옴을 유지하며 전체 범위를 실제 활용하는 Extreme Worldgen 별도 프리셋(`-512..511`, 64섹션) | 일반 바닐라 지형 유지 |
 | 네더 | Incendium(지형/논리 높이 `192`, `0..256` 범위 내 동작) | Incendium 기본 구성 검증(Bedrock `0..256` 한계 내 양립 가능) | 고도·포털(`logical_height=192`) 및 구조물 호환 확대 *(단 320/384 확장 애드온은 Bedrock 제외)* | 기본 네더 또는 높이 제한형 커스텀 팩 |
 | 엔드 | Nullscape(`min_y=0`, `height=384`, `logical_height=384`) | 일반 엔드 안정성 확보 | Nullscape Java 전용/실험 분기 검토(Bedrock `0..256` 한계 초과) | 높이 `256` 이내 대체 데이터팩/커스텀 엔드 |
 
@@ -153,6 +155,7 @@ max_generation_threads = 4
 
 ### 5.1 지켜야 할 원칙
 
+- Bedrock은 항상 최신 릴리즈만 지원하며 하위 버전은 지원하지 않는다. Java는 서버와 일치하는 버전만 지원하고 가능하면 최신 서버 버전을 사용한다.
 - Bedrock의 물리적 클라이언트 한계를 Rust 서버 코드만으로 없앨 수 있다고 가정하지 않는다.
 - Geyser 공식 문서(`Current Limitations`) 기준, 프로토콜/클라이언트 수준에서 해결 불가능한 높이 한계는 다음과 같다:
   - **오버월드(및 오버월드로 매핑된 커스텀 차원):** **-512 미만 또는 512 초과 불가**(블록 좌표 `-512..511`, 일반 확장 기본은 `-64..320`).
@@ -163,7 +166,7 @@ max_generation_threads = 4
 
 ### 5.2 Bedrock 호환성 테스트 체크리스트
 
-- 오버월드 `Y=-511, -200, 0, 319, 400, 510` 부근에서 청크 렌더링·블록 설치/파괴·액체/조명 확인.
+- 오버월드 `Y=-512, -511, -300, 0, 319, 500, 510, 511` 부근에서 청크 렌더링·블록 설치/파괴·액체/조명 확인.
 - 네더 `Y=0, 128, 191, 255` 부근(Incendium 지형·구조물·포털) 및 엔드 `Y=0, 128, 255` 경계 동작 확인.
 - Java/Bedrock 두 클라이언트의 동일 좌표 블록 상태 및 엔티티 위치 실시간 비교.
 - 차원 전환, 리스폰, 멀티플레이어 동기화, 데이터팩 구조물 및 바이옴 효과 검증.
@@ -189,7 +192,7 @@ max_generation_threads = 4
 **작업**
 - Pumpkin 안정적인 커밋 SHA 고정, 포크 생성, Linux x86-64 빌드 자동화(`Cargo.toml` 실제 크레이트 멤버 확인).
 - 동일 머신에서 Paper 26.3(Java 25+)과 Pumpkin 26.3 기본 구성 구동(`pumpkin.toml`에서 `[world.chunk] type = "anvil"` 명시 설정 및 MC 26.3 기본 whitelist 정책 확인).
-- 기준 테스트 월드, 시드, 클라이언트 버전(Java 26.3 / Bedrock 1.26.x), 봇/실유저 부하 시나리오 고정.
+- 기준 테스트 월드, 시드, 클라이언트 버전(서버와 일치하는 Java 및 테스트 시점 최신 Bedrock 릴리즈), 봇/실유저 부하 시나리오를 측정마다 기록·고정.
 
 **완료 조건:** Linux에서 재현 가능하게 빌드 성공, Java·Bedrock 기본 접속 확인, Paper 26.3 대비 기준 성능 로그 확보.
 
@@ -235,16 +238,16 @@ max_generation_threads = 4
 
 **작업**
 - 1,024블록(`-512..511`, 64섹션) 지원에 필요한 청크 직렬화·레지스트리·하이트맵·조명(skylight/blocklight)·저장(`anvil`/`.pump`) 구조 수정.
-- 고도차 600블록 산맥, 깊은 지하 구조, 대수층/광물/구조물 Y-범위 프리셋 개발.
+- 지면 Y=-300, 최대 고도차 800블록(정상 Y=500 부근)의 산과 일반 야생 수준 지하 깊이, 대수층/광물/구조물 Y-범위 프리셋 개발. Terralith 특수 바이옴과 전체 높이 범위의 동시 활용을 검증.
 - Vanilla 모드와 코드/설정으로 분리하고 개발 플래그(`enabled = false` 기본값)로 가드.
 
-**완료 조건:** 새 월드 생성·저장·재시작 가능, Y=-511~510 구간 Java 렌더링·조명·블록 상호작용 검증 통과, 기존 월드 오작동 방지 확인.
+**완료 조건:** 새 월드 생성·저장·재시작 가능, Y=-512~511 전 범위 실제 지형 활용 및 Java 렌더링·조명·블록 상호작용과 Terralith 특수 바이옴 보존 검증 통과, 기존 월드 오작동 방지 확인.
 
 ### Phase 6 — Bedrock 완전성 검증
 
 **작업**
 - Pumpkin 내장 Bedrock(RakNet/NetherNet)과 외부 Geyser 프록시 방식 A/B 비교 매트릭스 실행.
-- 오버월드(`-511..510`), 네더(Incendium `0..192`), 엔드(`0..255` vs Nullscape) 경계 및 포털·바이옴·인벤토리 동등성 테스트.
+- 오버월드(`-512..511`), 네더(Incendium `0..192`), 엔드(`0..255` vs Nullscape) 경계 및 포털·바이옴·인벤토리 동등성 테스트.
 - 클라이언트 한계를 초과하는 프리셋/데이터팩 로드 시 자동 탐지·경고·차단 로직 구현.
 
 **완료 조건:** 공식 지원으로 표시한 구성에서 주요 기능 정상 동작, 내장 Bedrock vs Geyser 차이 및 미지원 조합 문서화.
@@ -268,7 +271,7 @@ max_generation_threads = 4
 - **메모리:** 동일 조건의 **프로세스 전체 RSS/PSS 30% 이상 절감**을 1차 도전 목표로 설정(**순수 Rust / WASM 모드 한정**).
 - **PatchBukkit 모드:** 헤드리스 Paper + JVM(Java 25+)을 내장하므로 **Rust RSS + JVM 힙/메타스페이스/네이티브 메모리를 합산한 전체 프로세스 트리 PSS/RSS를 별도 집계**하며, 순수 Rust 수치와 절대 혼용하지 않음.
 - **월드 저장/재시작:** 데이터 손상 없이 동작.
-- **지형 생성:** `vanilla_compatible`과 `extreme_worldgen` 결과를 분리 계측하고, `anvil` 포맷과 `.pump` 포맷 결과도 구분 기록.
+- **지형 생성:** `vanilla_compatible`과 Terralith 특수 바이옴 및 전체 높이 범위를 목표로 하는 `extreme_worldgen` 결과를 분리 계측하고, `anvil` 포맷과 `.pump` 포맷 결과도 구분 기록.
 
 ### 8.2 공정한 비교 프로토콜
 
@@ -285,7 +288,9 @@ max_generation_threads = 4
 
 ## 9. 운영·안전·라이선스
 
-- 첫 개발 및 성능 테스트는 **운영 서버와 분리된 독립 환경**에서 진행.
+- 테스트 자원은 개발 위임으로 처리, 운영 서버와 분리된 독립 환경 필요.
+- **AI 위임 운영 전략:** 웬만하면 AI에 최대한 맡긴다. 구현·테스트·측정·설정은 AI에 위임하고, 배포·라이선스 수용·운영 자원 결정은 소유자가 통제한다.
+- 저장소 위치와 구성은 AI가 자유롭게 결정하며 공개(public) 저장소도 허용한다. 라이선스와 데이터팩 재배포 제한은 계속 준수한다.
 - 기존 월드의 원본을 직접 덮어쓰지 않으며, 수정·포맷 변환 전에 전체 백업과 복원 리허설 확인.
 - 사용 중인 플러그인/데이터팩에 대한 개별 호환성 문서(`PASS / PARTIAL / FAIL / NOT TESTED`) 유지.
 - 서버 공개 시 온라인 인증, MC 26.3 기본 whitelist 정책 점검, 권한 분리, 방화벽, MSMP 접근 제어, 네트워크 입력 검증을 기본 적용.
@@ -305,6 +310,8 @@ max_generation_threads = 4
 | Bedrock 차원 높이 제한(네더/엔드 `0..256`, 오버월드 `-512..512`) | 높음 | Incendium(`0..192`) 우선 적용, Nullscape(`0..384`) 선택적 분리, 초과 프리셋 자동 경고·차단 |
 | 청크 포맷 선택(`.pump` 기본값 vs `anvil`) 및 롤백 제약 | 중간 | Paper 호환/백업 경로에서는 `type = "anvil"` 명시 고정; `.pump` 사용 시 변환/복원 절차 사전 검증 |
 | 초고도 월드(`1,024`블록)의 메모리/생성 비용 | 높음 | 기본값 OFF, 새 월드 전용 가드, 청크 우선순위·압축·사전 생성 도입 |
+| Terralith 특수 바이옴과 전체 높이 범위의 동시 구현 불확실성 | 높음 | 별도 프리셋에서 바이옴 보존과 Y=-512~511 실제 활용을 Java·최신 Bedrock으로 검증하고 미달 사항을 기록 |
+| 최신 Bedrock 릴리즈 또는 서버 Java 버전 갱신 시 호환성 회귀 | 높음 | 각 릴리즈에서 최신 Bedrock과 서버 일치 Java를 재검증하고 하위 버전은 지원 범위에서 제외 |
 | 업스트림 Pumpkin 변경 및 MC 버전 업그레이드 | 중간 | 업스트림 커밋 SHA 고정, 작은 단위 패치 분리, 정기 리베이스 및 회귀 테스트 |
 | 라이선스/원본 데이터팩 재배포 위반 | 높음 | GPL-3.0 및 Stardust Labs License 준수 체크리스트, 외부 다운로드 스크립트/가이드 분리 |
 
@@ -337,21 +344,22 @@ project/
     └── backup_restore/
 ```
 
-> 위 폴더는 **예시 개발 구조**이며, 실제 Pumpkin 저장소의 `Cargo.toml` 워크스페이스 멤버(`pumpkin`, `pumpkin-world`, `pumpkin-protocol`, `pumpkin-data`, `pumpkin-plugin-*` 등)와 통합 방식에 맞춰 조정한다.
+> 저장소 위치·구성은 AI가 자유롭게 결정하고 공개 저장소로 운영해도 된다. 위 폴더는 **예시 개발 구조**이며, 실제 Pumpkin 저장소의 `Cargo.toml` 워크스페이스 멤버(`pumpkin`, `pumpkin-world`, `pumpkin-protocol`, `pumpkin-data`, `pumpkin-plugin-*` 등)와 통합 방식에 맞춰 조정한다.
 
 ## 12. MVP 완료 판정
 
 다음 조건을 모두 만족하면 **MVP(첫 사용 가능 버전)** 로 인정한다.
 
-- [ ] Java(26.3)와 Bedrock(1.26.x)에서 같은 월드에 정상 접속(내장 Bedrock 또는 검증된 Geyser 우회 경로 명시).
+- [ ] 서버 버전과 일치하는 Java(기준 26.3)와 최신 릴리즈 Bedrock에서 같은 월드에 정상 접속(내장 Bedrock 또는 검증된 Geyser 우회 경로 명시).
 - [ ] 기본 생존 시스템 및 `Anvil` 저장/백업/복원 기능이 안정적으로 동작.
 - [ ] 최소 한 개 이상의 실용적인 Paper 플러그인(PatchBukkit 또는 WASM 대체)과 기본 데이터팩 기능 검증 및 호환성 표 문서화.
 - [ ] Terralith 또는 Incendium 중 하나 이상에서 실제 월드 생성 검증.
+- [ ] 별도 Extreme Worldgen 목표의 Terralith 특수 바이옴 보존과 Y=-512~511 전 범위 실제 활용을 검증하고, 미달 시 그 사실과 제한을 명시.
 - [ ] Paper 26.3 대비 `pumpkin-native`(및 필요 시 `pumpkin-compat`) 성능 비교 결과를 통제 조건과 함께 재현 가능하게 기록.
 - [ ] 치명적인 월드 손상·데이터 유실 문제가 없음.
 - [ ] 지원되는 조합과 미지원 조합(라이선스·Bedrock 제한 포함)을 명확히 문서화.
 
-**MVP 이후 확장 목표:** Terralith + Incendium 완성 → Extreme Worldgen → Nullscape/대체 엔드 → 추가 최적화.
+**MVP 이후 확장 목표:** Terralith + Incendium 완성 → Extreme Worldgen의 미달 항목 개선 → Nullscape/대체 엔드 → 추가 최적화.
 
 ## 13. 참고 자료
 
@@ -368,6 +376,12 @@ project/
 - Nullscape: https://modrinth.com/datapack/nullscape
 
 ## 14. 개정 및 검증 이력 (Review Log)
+
+### v1.2 (2026-11-17) 사용자 결정 반영
+
+- 테스트 자원의 개발 위임과 운영 서버 분리, AI 위임 및 소유자 통제 범위, 저장소 위치·구성의 AI 자율 결정과 공개 허용을 명시.
+- 최신 Bedrock 릴리즈와 서버 일치 Java 버전만 지원하도록 범위를 정리.
+- Terralith 특수 바이옴과 Y=-512~511 전 범위 실제 활용의 동시 확보를 목표로 정하고, 지면 -300·최대 산 높이 800블록 및 관련 검증을 반영. 성능 수치는 실측 대상과 도전 목표로 유지.
 
 ### v1.1 (2026-11-17)
 
