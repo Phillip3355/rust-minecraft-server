@@ -291,9 +291,9 @@ impl BiomeSupplier for FixedBiomeSupplier {
     }
 }
 
-#[derive(Clone, Copy)]
 pub enum ActiveBiomeSupplier {
     MultiNoise(MultiNoiseBiomeSupplier),
+    Profile(Box<ParameterList<&'static Biome>>),
     End(end::TheEndBiomeSupplier),
     Fixed(FixedBiomeSupplier),
 }
@@ -302,6 +302,7 @@ impl BiomeSupplier for ActiveBiomeSupplier {
     fn biome(&self, x: i32, y: i32, z: i32, noise: &mut MultiNoiseSampler<'_>) -> &'static Biome {
         match self {
             Self::MultiNoise(supplier) => supplier.biome(x, y, z, noise),
+            Self::Profile(tree) => tree.find_value(&noise.sample(x, y, z)),
             Self::End(supplier) => supplier.biome(x, y, z, noise),
             Self::Fixed(supplier) => supplier.biome(x, y, z, noise),
         }
@@ -330,6 +331,11 @@ impl ActiveBiomeSupplier {
                 collect(supplier.source, &mut biomes);
                 biomes
             }
+            Self::Profile(tree) => tree
+                .values()
+                .iter()
+                .map(|(_, biome)| u16::from(biome.id))
+                .collect(),
             Self::End(_) => end::TheEndBiomeSupplier::POSSIBLE_BIOMES
                 .iter()
                 .map(|biome| u16::from(biome.id))
@@ -485,7 +491,7 @@ mod test {
     fn proper_network_bits_per_entry() {
         let id_to_test = 1 << BIOME_NETWORK_MAX_BITS;
         assert!(
-            Biome::from_id(id_to_test).is_none(),
+            Biome::ALL.iter().all(|biome| biome.id < id_to_test),
             "We need to update our constants!"
         );
     }

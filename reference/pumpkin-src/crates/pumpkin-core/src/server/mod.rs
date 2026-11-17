@@ -180,6 +180,13 @@ impl Server {
     ) -> Result<Arc<Self>, WorldInfoError> {
         let worldgen = &advanced_config.experimental.worldgen;
         if worldgen.enabled {
+            if worldgen.profile == pumpkin_world::world_info::worldgen_profile::EXTREME_PROFILE_ID
+                && pumpkin_data::worldgen_profile::terrain_profile().is_some()
+            {
+                return Err(WorldInfoError::IncompleteWorldgenProfile(
+                    worldgen.profile.clone(),
+                ));
+            }
             return Err(WorldInfoError::UnavailableWorldgenProfile(
                 worldgen.profile.clone(),
             ));
@@ -202,6 +209,7 @@ impl Server {
 
         let level_info = match AnvilLevelInfo.read_world_info(&world_path) {
             Ok(level_info) => {
+                level_info.worldgen_profile_matches(None)?;
                 let dat_path = world_path.join(LEVEL_DAT_FILE_NAME);
                 if dat_path.exists() {
                     let backup_path = world_path.join(LEVEL_DAT_BACKUP_FILE_NAME);

@@ -3127,7 +3127,13 @@ impl World {
             client.send_game_packet(data).await;
         }
 
-        if let Ok(data) = client.serialize_packet(&CBiomeDefinitionList) {
+        let biome_definitions = self
+            .level_info
+            .load()
+            .worldgen_profile
+            .as_ref()
+            .and_then(|_| pumpkin_data::worldgen_profile::bedrock_biomes());
+        if let Ok(data) = client.serialize_packet(&CBiomeDefinitionList(biome_definitions)) {
             client.send_game_packet(data).await;
         }
 

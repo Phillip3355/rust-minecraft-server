@@ -14,6 +14,7 @@ pub fn write_chunk_data(
     chunk: &ChunkData,
     mut write: impl Write,
     version: &JavaMinecraftVersion,
+    worldgen_profile_enabled: bool,
 ) -> Result<(), WritingError> {
     write.write_i32_be(chunk.x)?;
     write.write_i32_be(chunk.z)?;
@@ -137,7 +138,8 @@ pub fn write_chunk_data(
                 }
             }
 
-            let biome_network = biome_palette.convert_network();
+            let biome_network =
+                biome_palette.convert_network_with_profile(worldgen_profile_enabled);
             blocks_and_biomes_buf.write_u8(biome_network.bits_per_entry)?;
 
             match biome_network.palette {

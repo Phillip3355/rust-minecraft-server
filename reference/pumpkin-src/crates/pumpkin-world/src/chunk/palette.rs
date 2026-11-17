@@ -625,6 +625,11 @@ impl<V: Default + Hash + Eq + Copy, const DIM: usize> Default for PalettedContai
 impl BiomePalette {
     #[must_use]
     pub fn convert_network(&self) -> NetworkSerialization<u8> {
+        self.convert_network_with_profile(false)
+    }
+
+    #[must_use]
+    pub fn convert_network_with_profile(&self, profile_enabled: bool) -> NetworkSerialization<u8> {
         match self {
             Self::Homogeneous(registry_id) => NetworkSerialization {
                 bits_per_entry: 0,
@@ -634,7 +639,14 @@ impl BiomePalette {
             Self::Heterogeneous(data) => {
                 let raw_bits_per_entry = encompassing_bits(data.counts.len());
                 if raw_bits_per_entry > BIOME_NETWORK_MAX_MAP_BITS {
-                    let bits_per_entry = BIOME_NETWORK_MAX_BITS;
+                    let bits_per_entry = if profile_enabled {
+                        encompassing_bits(
+                            pumpkin_data::biome::Biome::ALL.len()
+                                + pumpkin_data::worldgen_profile::java_biomes().len(),
+                        )
+                    } else {
+                        BIOME_NETWORK_MAX_BITS
+                    };
                     let values_per_i64 = 64 / bits_per_entry;
                     let mut packed_data =
                         Vec::with_capacity(Self::VOLUME.div_ceil(values_per_i64 as usize));
@@ -647,7 +659,7 @@ impl BiomePalette {
                                 let z = ((current_idx + i) / Self::SIZE) % Self::SIZE;
                                 let x = (current_idx + i) % Self::SIZE;
                                 let value = data.get(x, y, z);
-                                debug_assert!((1 << bits_per_entry) > value);
+                                debug_assert!((1u16 << bits_per_entry) > u16::from(value));
                                 acc |= (value as u64) << (bits_per_entry as u64 * i as u64);
                             }
                         }

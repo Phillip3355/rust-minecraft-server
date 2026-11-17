@@ -33,6 +33,7 @@ pub const LEVEL_DAT_FILE_NAME: &str = "level.dat";
 pub const LEVEL_DAT_BACKUP_FILE_NAME: &str = "level.dat_old";
 
 const LEVEL_DATA_TAG: &str = "Data";
+const WORLDGEN_PROFILE_TAG: &str = "PumpkinWorldgenProfile";
 const WORLD_GEN_SETTINGS_TAG: &str = "WorldGenSettings";
 
 pub struct AnvilLevelInfo;
@@ -347,6 +348,9 @@ fn level_data_to_nbt(info: &LevelData, data: &mut NbtCompound) {
     data.put_int("version", info.level_version);
     data.put_int("map_id", info.map_id);
     put_world_gen_settings_seed(data, info.world_gen_settings.seed);
+    if let Some(profile) = &info.worldgen_profile {
+        data.put_compound(WORLDGEN_PROFILE_TAG, profile.to_nbt());
+    }
 }
 
 fn stamp_current_version(level_data: &mut LevelData) {
@@ -390,6 +394,15 @@ impl WorldInfoReader for AnvilLevelInfo {
         };
 
         let mut level_data = level_data_from_nbt(data, seed);
+        if let Some(profile) = data.get(WORLDGEN_PROFILE_TAG) {
+            let NbtTag::Compound(profile) = profile else {
+                return Err(WorldInfoError::DeserializationError(
+                    "Invalid PumpkinWorldgenProfile tag".into(),
+                ));
+            };
+            level_data.worldgen_profile =
+                Some(super::worldgen_profile::WorldgenProfile::from_nbt(profile)?);
+        }
 
         if let Some(wgs) = read_world_gen_settings(level_folder) {
             level_data.world_gen_settings = wgs;
@@ -459,6 +472,22 @@ impl WorldInfoWriter for AnvilLevelInfo {
             .get_compound(LEVEL_DATA_TAG)
             .cloned()
             .unwrap_or_default();
+        if path.exists() {
+            let stored_profile = match data_comp.get(WORLDGEN_PROFILE_TAG) {
+                None => None,
+                Some(NbtTag::Compound(profile)) => {
+                    Some(super::worldgen_profile::WorldgenProfile::from_nbt(profile)?)
+                }
+                Some(_) => {
+                    return Err(WorldInfoError::DeserializationError(
+                        "Invalid PumpkinWorldgenProfile tag".into(),
+                    ));
+                }
+            };
+            if stored_profile != level_data.worldgen_profile {
+                return Err(WorldInfoError::WorldgenProfileMismatch);
+            }
+        }
         level_data_to_nbt(&level_data, &mut data_comp);
         root.put_compound(LEVEL_DATA_TAG, data_comp);
 
@@ -902,6 +931,7 @@ mod test {
 
     static LEVEL_DAT: LazyLock<LevelDat> = LazyLock::new(|| LevelDat {
         data: LevelData {
+            worldgen_profile: None,
             allow_commands: true,
             border_center_x: 0.0,
             border_center_z: 0.0,

@@ -17,7 +17,7 @@ use std::io::Write;
 /// This includes heightmaps, the actual block and biome data (organized into sections),
 /// block entities (like signs or chests), and the light level information for both
 /// sky and block light.
-pub struct CChunkData<'a>(pub &'a ChunkData);
+pub struct CChunkData<'a>(&'a ChunkData, bool);
 
 impl MultiVersionJavaPacket for CChunkData<'_> {
     fn to_id(version: JavaMinecraftVersion) -> i32 {
@@ -28,7 +28,12 @@ impl MultiVersionJavaPacket for CChunkData<'_> {
 impl<'a> CChunkData<'a> {
     #[must_use]
     pub const fn new(chunk: &'a ChunkData) -> Self {
-        Self(chunk)
+        Self(chunk, false)
+    }
+
+    #[must_use]
+    pub const fn with_profile(chunk: &'a ChunkData, enabled: bool) -> Self {
+        Self(chunk, enabled)
     }
 }
 
@@ -38,7 +43,7 @@ impl ClientPacket for CChunkData<'_> {
         write: impl Write,
         version: &JavaMinecraftVersion,
     ) -> Result<(), WritingError> {
-        v1_18::write_chunk_data(self.0, write, version)
+        v1_18::write_chunk_data(self.0, write, version, self.1)
     }
 }
 
@@ -50,7 +55,7 @@ mod tests {
     #[test]
     fn chunk_data_all_versions() {
         let chunk = ChunkData::empty(0, 0);
-        let packet = CChunkData(&chunk);
+        let packet = CChunkData::new(&chunk);
 
         let versions = [JavaMinecraftVersion::V_26_3];
 
@@ -88,7 +93,7 @@ mod tests {
             nbt,
         );
 
-        let packet = CChunkData(&chunk);
+        let packet = CChunkData::new(&chunk);
 
         let versions = [JavaMinecraftVersion::V_26_3];
 

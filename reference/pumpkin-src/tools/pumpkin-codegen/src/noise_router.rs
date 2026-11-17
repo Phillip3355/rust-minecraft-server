@@ -2226,21 +2226,28 @@ impl NoiseRouterRepr {
     }
 }
 
-fn load_df_json(base_df_dir: &std::path::Path, name: &str) -> serde_json::Value {
-    let clean = name.strip_prefix("minecraft:").unwrap_or(name);
-    let path = base_df_dir.join(format!("{clean}.json"));
-    let content = fs::read_to_string(&path).unwrap_or_else(|err| {
-        panic!(
-            "Failed to read density function at {}: {err}",
-            path.display()
-        )
-    });
-    serde_json::from_str(&content).unwrap_or_else(|err| {
-        panic!(
-            "Failed to parse density function at {}: {err}",
-            path.display()
-        )
-    })
+struct DensityResources<'a> {
+    directory: &'a std::path::Path,
+    profile: Option<(&'a str, &'a BTreeMap<String, std::path::PathBuf>, bool)>,
+}
+
+fn load_df_json(resources: &DensityResources<'_>, name: &str) -> serde_json::Value {
+    if let Some((prefix, noises, extreme)) = resources.profile {
+        let path = crate::profile_resources::resource_path(
+            resources.directory,
+            "worldgen/density_function",
+            name,
+        );
+        let mut json = crate::profile_resources::read_json(&path);
+        crate::profile_resources::profile_noise_references(&mut json, prefix, noises);
+        if extreme {
+            crate::extreme_height::map_density_y(&mut json);
+        }
+        json
+    } else {
+        let clean = name.strip_prefix("minecraft:").unwrap_or(name);
+        crate::profile_resources::read_json(&resources.directory.join(format!("{clean}.json")))
+    }
 }
 
 fn clean_noise_name(n: &str) -> String {
@@ -2275,13 +2282,18 @@ fn parse_metric(s: &str) -> DistanceMetric {
     }
 }
 
-fn parse_vanilla_df(base_df_dir: &std::path::Path, val: &serde_json::Value) -> DensityFunctionRepr {
+fn parse_vanilla_df(
+    base_df_dir: &DensityResources<'_>,
+    val: &serde_json::Value,
+) -> DensityFunctionRepr {
     match val {
         serde_json::Value::Number(n) => DensityFunctionRepr::Constant {
             value: HashableF32(n.as_f64().unwrap_or(0.0) as f32),
         },
         serde_json::Value::String(s) => {
-            if s == "minecraft:y" {
+            if s == "minecraft:y" && base_df_dir.profile.is_some_and(|(_, _, extreme)| extreme) {
+                parse_vanilla_df(base_df_dir, &crate::extreme_height::source_y_density())
+            } else if s == "minecraft:y" {
                 DensityFunctionRepr::Gradient {
                     data: GradientData {
                         axis: Axis::Y,
@@ -2848,7 +2860,7 @@ fn parse_vanilla_df(base_df_dir: &std::path::Path, val: &serde_json::Value) -> D
     }
 }
 
-fn parse_vanilla_spline(base_df_dir: &std::path::Path, val: &serde_json::Value) -> SplineRepr {
+fn parse_vanilla_spline(base_df_dir: &DensityResources<'_>, val: &serde_json::Value) -> SplineRepr {
     if let Some(n) = val.as_f64() {
         return SplineRepr::Fixed {
             value: HashableF32(n as f32),
@@ -2889,7 +2901,7 @@ fn parse_vanilla_spline(base_df_dir: &std::path::Path, val: &serde_json::Value) 
 
 fn load_vanilla_noise_router(
     base_ns_dir: &std::path::Path,
-    base_df_dir: &std::path::Path,
+    base_df_dir: &DensityResources<'_>,
     dim_name: &str,
 ) -> NoiseRouterRepr {
     let path = base_ns_dir.join(format!("{dim_name}.json"));
@@ -2901,6 +2913,14 @@ fn load_vanilla_noise_router(
             path.display()
         )
     });
+    read_noise_router(&val, base_df_dir, dim_name)
+}
+
+fn read_noise_router(
+    val: &serde_json::Value,
+    base_df_dir: &DensityResources<'_>,
+    dim_name: &str,
+) -> NoiseRouterRepr {
     let nr = val
         .get("noise_router")
         .expect("Missing noise_router in noise_settings");
@@ -2983,8 +3003,13 @@ fn load_vanilla_noise_router(
 fn load_vanilla_noise_routers() -> NoiseRouterReprs {
     let base_ns_dir =
         std::path::Path::new("../../assets/datapack/data/minecraft/worldgen/noise_settings");
-    let base_df_dir =
-        std::path::Path::new("../../assets/datapack/data/minecraft/worldgen/density_function");
+    let resources = DensityResources {
+        directory: std::path::Path::new(
+            "../../assets/datapack/data/minecraft/worldgen/density_function",
+        ),
+        profile: None,
+    };
+    let base_df_dir = &resources;
 
     let overworld = load_vanilla_noise_router(base_ns_dir, base_df_dir, "overworld");
     let overworld_large_biomes =
@@ -3002,6 +3027,49 @@ fn load_vanilla_noise_routers() -> NoiseRouterReprs {
         end,
         end_islands,
     }
+}
+
+pub fn build_profile(
+    data: &std::path::Path,
+    overworld: serde_json::Value,
+    nether: serde_json::Value,
+    noises: &BTreeMap<String, std::path::PathBuf>,
+) -> TokenStream {
+    let routers = [
+        ("extreme_overworld", overworld, true),
+        ("incendium_nether", nether, false),
+    ];
+    routers
+        .into_iter()
+        .map(|(name, mut value, extreme)| {
+            let resources = DensityResources {
+                directory: data,
+                profile: Some(("profile", noises, extreme)),
+            };
+            crate::profile_resources::profile_noise_references(
+                &mut value["noise_router"],
+                "profile",
+                noises,
+            );
+            crate::profile_resources::profile_noise_references(
+                &mut value["aquifers"],
+                "profile",
+                noises,
+            );
+            if extreme {
+                crate::extreme_height::map_density_y(&mut value["noise_router"]);
+                crate::extreme_height::map_density_y(&mut value["aquifers"]);
+            }
+            let original_name = if extreme { "overworld" } else { "nether" };
+            let (router, compiled) = read_noise_router(&value, &resources, original_name)
+                .into_token_stream_compiled(name);
+            let ident = quote::format_ident!("{}_ROUTER", name.to_uppercase());
+            quote! {
+                #compiled
+                pub const #ident: BaseNoiseRouters = #router;
+            }
+        })
+        .collect()
 }
 
 /// Reads vanilla datapack noise_settings and density_function files and emits the complete noise-router constants `TokenStream`.

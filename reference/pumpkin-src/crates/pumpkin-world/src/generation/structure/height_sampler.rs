@@ -59,7 +59,7 @@ impl<'a> NoiseHeightSampler<'a> {
                 settings.sea_level,
                 Block::from_state_id(settings.default_fluid.id),
             ),
-            FluidLevel::new(-54, &Block::LAVA),
+            FluidLevel::new(self.generator.lava_y, &Block::LAVA),
         );
         let volume = DensityVolume::with_block_step(
             1,

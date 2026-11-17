@@ -1,7 +1,4 @@
-use pumpkin_data::{
-    structures::{Structure, StructureKeys},
-    tag::{RegistryKey, get_tag_ids},
-};
+use pumpkin_data::structures::{Structure, StructureKeys};
 
 use crate::{
     ProtoChunk,
@@ -89,7 +86,8 @@ fn generate_structure_position_checked(
         StructureKeys::JunglePyramid => JungleTempleGenerator
             .get_structure_position(context)
             .filter(|pos| is_valid_biome(pos.start_pos)),
-        StructureKeys::VillagePlains
+        StructureKeys::Pack(_)
+        | StructureKeys::VillagePlains
         | StructureKeys::VillageDesert
         | StructureKeys::VillageSavanna
         | StructureKeys::VillageSnowy
@@ -193,13 +191,7 @@ pub fn try_generate_structure(
     sea_level: i32,
     height_sampler: Option<&mut dyn crate::generation::structure::structures::HeightSampler>,
 ) -> Option<StructurePosition> {
-    let biomes = get_tag_ids(
-        RegistryKey::WorldgenBiome,
-        structure
-            .biomes
-            .strip_prefix('#')
-            .unwrap_or(structure.biomes),
-    )?;
+    let biomes = ProtoChunk::structure_biomes(*key);
     let random = create_chunk_random(seed, chunk.x, chunk.z);
     let context = StructureGeneratorContext {
         seed,
@@ -236,13 +228,7 @@ pub fn lazily_generate_structure(
     biome_supplier: &dyn BiomeSupplier,
     multi_noise_sampler: &mut MultiNoiseSampler,
 ) -> Option<StructurePosition> {
-    let biomes = get_tag_ids(
-        RegistryKey::WorldgenBiome,
-        structure
-            .biomes
-            .strip_prefix('#')
-            .unwrap_or(structure.biomes),
-    )?;
+    let biomes = ProtoChunk::structure_biomes(*key);
     if *key == StructureKeys::Monument {
         let center_x = crate::generation::positions::chunk_pos::get_center_x(context.chunk_x);
         let center_z = crate::generation::positions::chunk_pos::get_center_z(context.chunk_z);

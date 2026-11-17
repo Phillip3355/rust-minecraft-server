@@ -1,6 +1,6 @@
 # Phase 5 — Extreme Worldgen
 
-**상태: 부분 구현.** Pumpkin의 64섹션 청크 처리와 빌드 프로파일 입력 스테이징을 추가했다. Extreme 생성기와 클라이언트 레지스트리 연동은 미완료다. 실서버 검증은 **NOT TESTED**다.
+**상태: 부분 구현.** 64섹션 청크 기반에 Terralith·Incendium 생성 프로파일의 컴파일 경로, 바이옴 동기화, 지그소 등록과 프로파일 영속화를 추가했다. 팩 장식 피처 및 카버와 클라이언트 구조물 동기화가 남아 서버 시작 가드를 유지한다. 실서버 검증은 **NOT TESTED**다.
 
 ## 확정 좌표
 
@@ -20,18 +20,26 @@
 - Anvil은 기존 NBT 태그를 사용한다. `.pump` 지역 파일 헤더는 그대로 사용하고, 넓은 높이맵을 쓰는 청크의 `PCHK` 페이로드에는 버전 2와 높이맵 비트 폭을 기록한다. 기존 버전 1 청크를 읽을 수 있으며, 9비트만 필요한 청크는 버전 1로 쓴다.
 - 랜덤 틱 마스크는 섹션 수에 맞춰 64비트 워드를 할당한다. Java의 전체 청크와 조명 갱신 패킷은 같은 조명 인코더를 사용한다. 확장 청크의 최상단 섹션 비트는 64, 상한 바깥 조명 비트는 65다. 균일한 비영 조명은 저장과 전송 시 니블 배열로 변환한다.
 
-## 빌드 입력 스테이징
+## 프로파일 빌드
 
-로컬에 추출된 바닐라 26.3 데이터와 `reference/datapacks/`의 Terralith 및 Incendium을 사용한다. 저장소 루트에서 다음 두 명령을 실행하면 지정 디렉터리에 프로파일 입력이 생성된다.
+저장소 루트에서 실행한다. 바닐라 26.3 데이터는 미리 추출된 로컬 `reference/pumpkin-src/assets/datapack`을 사용한다.
 
 ```sh
 mkdir -p .work/phase5
-CARGO_NET_OFFLINE=true CARGO_PROFILE_DEV_LTO=false CARGO_PROFILE_DEV_CODEGEN_UNITS=16 \
-  cargo run --manifest-path reference/pumpkin-src/Cargo.toml --offline -j 2 \
-  -p pumpkin-codegen -- stage-worldgen-profile .work/phase5/profile
+CARGO_NET_OFFLINE=true cargo run --manifest-path reference/pumpkin-src/Cargo.toml \
+  --offline -j 2 -p pumpkin-codegen -- stage-worldgen-profile .work/phase5/staged
+CARGO_NET_OFFLINE=true cargo run --manifest-path reference/pumpkin-src/Cargo.toml \
+  --offline -j 2 -p pumpkin-codegen -- compile-worldgen-profile \
+  .work/phase5/staged .work/phase5/compiled
 ```
 
-스테이징은 바닐라 → Terralith → Incendium 순서로 전체 네임스페이스를 유지해 합친다. 충돌한 일반 리소스는 마지막 팩을 사용한다. 태그는 값을 이어 붙이고 `replace: true`에서 교체한다. `manifest.json`에는 입력·출력의 파일별 SHA-256, 충돌 출처, 목표 좌표가 기록된다. 양쪽 차원의 dimension type과 noise settings 참조, 인라인 기후 목록의 바이옴 참조, Incendium 네더의 차원 경계를 검사한다. 산출물의 상태는 `codegen_input`이며 바이옴 검색 트리나 생성기 실행 코드를 포함하지 않는다.
+스테이징은 바닐라 → Terralith → Incendium 순으로 네임스페이스를 유지해 합친다. 마지막 팩이 일반 리소스의 충돌을 결정한다. 태그는 값을 이어 붙이고 `replace: true`에서 교체한다. 컴파일 단계는 manifest의 출력 SHA-256과 실제 파일 목록을 대조한 뒤 밀도·노이즈·지표 규칙, 기후 목록, 구조물 집합·지그소 풀·프로세서 및 NBT 템플릿을 빌드 입력으로 생성한다. `PUMPKIN_COMPILED_WORLDGEN_PROFILE`을 컴파일 출력 디렉터리의 절대 경로로 설정하면 빌드에 이 입력이 포함된다.
+
+오버월드 라우터는 지형 기준점 `-64 → -512`, `63 → -400`, `319 → 400`으로 수직 기울기와 높이 앵커를 변환한다. 밀도 라우터의 정상 상한은 Y=400이다. 해수면, 대수층의 하층 용암 및 광맥의 Y 범위도 변환한다. 지표 고정 구조물은 새 해수면과 지형 높이에서 배치하며 지면 투영 구조물은 팩의 상대 배치 오프셋을 사용한다. Incendium 생성 높이는 192, 청크 저장 높이는 256, 논리 높이는 192다. 두 팩의 기후 목록은 동일한 샘플러를 사용하는 차원별 검색 트리에서 처리한다.
+
+Terralith 95종과 Incendium 8종의 바이옴 ID는 바닐라 ID 뒤에 배정한다. Anvil 바이옴 팔레트에 네임스페이스를 보존한다. Java 프로파일 레지스트리에는 바이옴과 차원 높이를 넣고 해당 레지스트리 크기에 맞춰 직접 팔레트를 인코딩한다. Bedrock 프로파일 바이옴 정의에는 기존 ID와 겹치지 않는 ID를 배정한다. 양쪽 클라이언트의 접속과 렌더링은 **NOT TESTED**다.
+
+## 설정 및 저장
 
 ```toml
 [experimental.worldgen]
@@ -39,13 +47,14 @@ enabled = false
 profile = "terralith_incendium_extreme_v1"
 ```
 
-기존 설정에서 이 항목을 생략해도 비활성화 상태다. 현재 `enabled = true`는 컴파일된 생성기가 없다는 오류를 반환한다. 이 검사는 `level.dat` 조회, 백업 및 쓰기 전에 실행된다.
+설정을 생략하면 비활성화된다. 현재 활성화 요청은 빌드 입력 유무에 따른 오류를 반환하고 월드 열기 전에 종료한다. 시험용 프리셋의 생성기 참조는 `data/minecraft/world_gen_settings.dat`에 저장한다. `level.dat`의 `PumpkinWorldgenProfile`은 프로파일 ID, 버전, 스테이징 입력 해시 및 차원 경계를 기록한다. 기본 월드의 저장에는 이 태그가 없다. 기록이 손상됐거나 선택과 불일치하면 열기 또는 덮어쓰기를 거부한다.
 
 ## 남은 범위
 
-- 팩의 namespaced density/noise/surface rule을 생성 코드에 연결하고, 기후 목록에서 Terralith 및 Incendium 바이옴을 선택하는 검색 트리를 생성해야 한다. 서버 선택 결과와 클라이언트 동기화에 동일한 바이옴 ID가 필요하다.
-- 지면과 정상 목표를 실제 밀도 라우터에 반영하고 대수층, 지표 규칙, 광물, 피처, 구조물 높이를 함께 변환해야 한다. 팩의 참조를 끝까지 해석하고 카버, 피처, processor, template pool, 구조물 실행 경로를 완성해야 한다. 현재 스테이징 검사는 진입점과 기후 바이옴 참조를 다룬다.
-- 완성된 프로파일을 차원·레지스트리와 함께 등록하고 새 월드의 프로파일 ID, 버전, 입력 해시, 차원 경계를 영속화해야 한다. 기존 월드 적용 및 불일치 상태에서의 재시작을 거부하는 검증도 이 연결에 포함된다.
+- 팩 바이옴의 장식 피처, 카버와 바닐라 레지스트리 오버라이드를 생성 단계에 연결해야 한다. 코드 생성 단계에서 팩 바이옴의 배치 피처 참조를 검사하지만 현재 해당 장식을 실행하지 않는다. 고도 적응 앵커와 광맥 범위 보정은 별도의 광물 배치 피처 전체에 적용되지 않았다.
+- 팩의 지그소 구조물은 기존 배치 코드로 전달한다. 기존 프로세서 파서의 미지원 타입, 팩 템플릿 변형, 모든 구조물의 실제 출현과 배치 높이의 검증이 남아 있다.
+- Java의 기본 동기화 목록에는 `worldgen/structure`가 없다. Bedrock의 지그소 패킷은 빈 목록을 내보낸다. 양쪽의 구조물 클라이언트 동기화는 미완료다.
+- Y=400은 밀도 라우터의 상한이다. 실제 지형에서 목표 지면과 정상 분포를 달성했는지는 추가 검증이 필요하다. 정상 프로파일의 서버 시작 경로는 가드가 막고 있다.
 
 ## 검증 범위
 
@@ -53,14 +62,9 @@ profile = "terralith_incendium_extreme_v1"
 |---|---|
 | `tools/world-verify` | 유닛 24개 및 회귀 26개 통과 |
 | `tools/datapack-audit` | 20개 통과 |
-| `pumpkin-codegen`, `pumpkin-config` | 각각 8개, 24개 통과 |
-| `pumpkin-world --lib` | 302개 통과. 임시 복사본에서 벤치마크 전용 Criterion 의존성만 제외했다. 제출 manifest는 수정하지 않았다. |
-| `pumpkin-core --lib net::java::chunk_data` | 3개 통과. 26.3 조명 왕복에서 비트 64와 65, skylight와 blocklight 배열을 확인했다. |
-| 빌드 입력 스테이징 | 두 번 실행해 manifest 및 전체 15,839개 출력 SHA-256 일치 확인. 충돌 경로 303개, 기본 기후 목록의 Terralith 바이옴 참조 90종 및 Incendium 바이옴 참조 8종을 확인했다. |
-| Pumpkin 전체 `cargo test --offline -j 2` | 캐시에 `alloca 0.4.0`이 없어 테스트 실행 전 종료 코드 101 |
+| 컴파일 재현성 | 동일 스테이징 입력에서 Rust 소스 및 묶음 템플릿 바이트 비교 |
+| 실서버 기동 및 재시작 | **NOT TESTED** |
+| Java/Bedrock 플레이와 렌더링 | **NOT TESTED** |
+| 인게임 조명과 블록 상호작용 | **NOT TESTED** |
 
-Cargo 실행은 LTO 비활성화 및 codegen-units 16을 환경 변수로 지정했다. 작업 워크트리에 없던 바닐라 추출 데이터는 같은 저장소의 기존 체크아웃에서 가져왔으며, 테스트와 빌드 산출물은 Git에서 제외했다.
-
-연결 워크트리의 Git 메타데이터가 읽기 전용이므로 원래 HEAD는 유지했다. 같은 기준 커밋을 부모로 하는 커밋 이력과 diff는 워크트리 내 별도 Git 저장소와 패치로 제출한다.
-
-실서버 기동·종료 후 재시작, Java/Bedrock 플레이, 접속 및 렌더링, 인게임 조명과 블록 상호작용, 실제 지형 높이 분포와 팩 바이옴·구조물의 출현은 모두 **NOT TESTED**다. 서버는 기동하지 않았다.
+서버 기동, 접속, 플레이, 인게임 조명 및 블록 상호작용은 실행하지 않았다. 오프라인 유닛과 통합 테스트는 메모리에서 생성·등록·저장 단계를 호출한다.

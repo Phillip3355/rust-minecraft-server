@@ -813,7 +813,7 @@ impl ProtoChunk {
                 settings.sea_level,
                 Block::from_state_id(settings.default_fluid.id),
             ),
-            FluidLevel::new(-54, &Block::LAVA),
+            FluidLevel::new(generator.lava_y, &Block::LAVA),
         );
 
         let mut beardifier_structures = Vec::new();
@@ -1020,7 +1020,7 @@ impl ProtoChunk {
         let start_biome_x = biome_coords::from_block(start_block_x);
         let start_biome_z = biome_coords::from_block(start_block_z);
 
-        match generator.biome_supplier {
+        match &generator.biome_supplier {
             crate::biome::ActiveBiomeSupplier::Fixed(fixed) => {
                 self.flat_biome_map.fill(fixed.biome.id);
             }
@@ -1028,7 +1028,8 @@ impl ProtoChunk {
                 let biome = end.biome(start_biome_x, 0, start_biome_z, multi_noise_sampler);
                 self.flat_biome_map.fill(biome.id);
             }
-            crate::biome::ActiveBiomeSupplier::MultiNoise(multi) => {
+            crate::biome::ActiveBiomeSupplier::MultiNoise(_)
+            | crate::biome::ActiveBiomeSupplier::Profile(_) => {
                 let min_y = self.bottom_y();
                 let bottom_section = section_coords::block_to_section(min_y as i32);
                 let top_section =
@@ -1055,7 +1056,7 @@ impl ProtoChunk {
                     for x in 0..biomes_per_section {
                         for y in 0..biomes_per_section {
                             for z in 0..biomes_per_section {
-                                let biome = multi.biome(
+                                let biome = generator.biome_supplier.biome(
                                     start_biome_x + x,
                                     start_biome_y + y,
                                     start_biome_z + z,
@@ -1214,8 +1215,8 @@ impl ProtoChunk {
         let mut vein_context = settings.ore_veins_enabled.then(|| {
             let chunk_min_y = i32::from(min_y);
             let chunk_max_y = chunk_min_y + i32::from(self.height());
-            let vein_min_y = (-60).max(chunk_min_y);
-            let vein_max_y = 52.min(chunk_max_y);
+            let vein_min_y = generator.vein_y.0.max(chunk_min_y);
+            let vein_max_y = generator.vein_y.1.min(chunk_max_y);
             let vein_height = (vein_max_y - vein_min_y).max(0) as usize;
             let volume =
                 DensityVolume::with_block_step(16, vein_height, 16, start_x, vein_min_y, start_z);
@@ -1445,7 +1446,10 @@ impl ProtoChunk {
     ) {
         static STRUCTURES_PER_STEP: LazyLock<[Vec<StructureKeys>; 11]> = LazyLock::new(|| {
             let mut steps: [Vec<StructureKeys>; 11] = Default::default();
-            for name in StructureKeys::all_names() {
+            for name in StructureKeys::all_names()
+                .iter()
+                .chain(pumpkin_data::worldgen_profile::structure_names())
+            {
                 if let Some(key) = StructureKeys::from_name(name) {
                     let s = Structure::get(&key);
                     steps[s.step.ordinal()].push(key);
@@ -1550,6 +1554,10 @@ impl ProtoChunk {
     /// The biomes a structure may start in (vanilla `Structure.biomes()`).
     #[must_use]
     pub fn structure_biomes(key: StructureKeys) -> &'static [u16] {
+        if let StructureKeys::Pack(_) = key {
+            return pumpkin_data::worldgen_profile::structure(key.to_name())
+                .map_or(&[], |(_, _, biomes)| biomes);
+        }
         let structure = Structure::get(&key);
         get_tag_ids(
             RegistryKey::WorldgenBiome,
@@ -1609,7 +1617,7 @@ impl ProtoChunk {
         > = None;
         let mut multi_noise_sampler: Option<MultiNoiseSampler<'_>> = None;
 
-        for (i, set) in StructureSet::ALL.iter().enumerate() {
+        for (i, set) in generator.structure_sets.iter().enumerate() {
             if !generator.enabled_structure_sets.contains(&i) {
                 continue;
             }
@@ -1739,7 +1747,7 @@ impl ProtoChunk {
         let chunk_min_y = (self.generation_bottom_y() as i32).max(self.bottom_y() as i32);
         let chunk_height = self.generation_height().min(self.height());
 
-        for (set_index, set) in StructureSet::ALL.iter().enumerate() {
+        for (set_index, set) in generator.structure_sets.iter().enumerate() {
             if !generator.enabled_structure_sets.contains(&set_index) {
                 continue;
             }

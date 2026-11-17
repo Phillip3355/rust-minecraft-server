@@ -101,6 +101,11 @@ impl WorldGenerator {
         }
     }
 
+    #[must_use]
+    pub fn uses_worldgen_profile(&self) -> bool {
+        matches!(self, Self::Noise(generator) if matches!(generator.biome_supplier, crate::biome::ActiveBiomeSupplier::Profile(_)))
+    }
+
     /// See [`VanillaGenerator::can_locate_structure`]. Other generators keep every structure.
     #[must_use]
     pub fn can_locate_structure(&self, set_index: usize, key: StructureKeys) -> bool {
@@ -136,6 +141,8 @@ pub struct VanillaGenerator {
     pub dimension: Dimension,
     pub settings: &'static NoiseSettings,
     pub surface_rule: &'static MaterialRule,
+    pub lava_y: i32,
+    pub vein_y: (i32, i32),
     pub biome_supplier: crate::biome::ActiveBiomeSupplier,
     pub biome_mixer_seed: i64,
 
@@ -147,6 +154,7 @@ pub struct VanillaGenerator {
     pub structure_calculator: StructurePlacementCalculator,
     pub structure_allowed_biomes: FxHashMap<usize, Vec<u16>>,
     pub enabled_structure_sets: FxHashSet<usize>,
+    pub structure_sets: Vec<&'static StructureSet>,
     pub uniform_carvers: Option<&'static [&'static pumpkin_data::carver::CarverConfig]>,
     pub possible_biomes: FxHashSet<u16>,
 }
@@ -203,11 +211,79 @@ impl VanillaGenerator {
             .unwrap_or_else(|| MaterialRule::from_dimension(&dimension));
         let biome_supplier =
             crate::biome::ActiveBiomeSupplier::from_biome_source(biome_source, &dimension);
-        let random_config = GlobalRandomConfig::new(seed.0, settings.legacy_random_source);
-
         let base = settings_name
             .and_then(BaseNoiseRouters::from_name)
             .unwrap_or_else(|| BaseNoiseRouters::from_dimension(&dimension));
+        Self::from_terrain(
+            seed,
+            dimension,
+            settings,
+            surface_rule,
+            biome_supplier,
+            base,
+            structure_overrides,
+        )
+    }
+
+    #[must_use]
+    pub fn from_profile(
+        seed: Seed,
+        profile: &pumpkin_data::worldgen_profile::ProfileDimension,
+    ) -> Self {
+        let dimension = profile.dimension.clone();
+        let biome_supplier = crate::biome::ActiveBiomeSupplier::Profile(Box::new(
+            crate::biome::ParameterList::new(profile.climate.to_vec()),
+        ));
+        let mut generator = Self::from_terrain(
+            seed,
+            dimension,
+            profile.settings,
+            profile.surface,
+            biome_supplier,
+            profile.router,
+            None,
+        );
+        generator.lava_y = profile.lava_y;
+        generator.vein_y = profile.vein_y;
+        for &(name, set) in pumpkin_data::worldgen_profile::structure_sets() {
+            let in_overworld = generator.dimension == Dimension::OVERWORLD;
+            if name.starts_with("terralith:") != in_overworld {
+                continue;
+            }
+            let index = if let Some(index) = StructureSet::NAMES
+                .iter()
+                .position(|vanilla| name.strip_prefix("minecraft:") == Some(*vanilla))
+            {
+                generator.structure_sets[index] = set;
+                index
+            } else {
+                generator.structure_sets.push(set);
+                generator.structure_sets.len() - 1
+            };
+            let biomes = ProtoChunk::get_allowed_biomes(set);
+            if biomes
+                .iter()
+                .any(|biome| generator.possible_biomes.contains(biome))
+            {
+                generator.enabled_structure_sets.insert(index);
+            } else {
+                generator.enabled_structure_sets.remove(&index);
+            }
+            generator.structure_allowed_biomes.insert(index, biomes);
+        }
+        generator
+    }
+
+    fn from_terrain(
+        seed: Seed,
+        dimension: Dimension,
+        settings: &'static NoiseSettings,
+        surface_rule: &'static MaterialRule,
+        biome_supplier: crate::biome::ActiveBiomeSupplier,
+        base: &'static BaseNoiseRouters,
+        structure_overrides: Option<&[String]>,
+    ) -> Self {
+        let random_config = GlobalRandomConfig::new(seed.0, settings.legacy_random_source);
         let terrain_cache = TerrainCache::from_random(&random_config);
 
         let default_block = settings.default_block;
@@ -276,6 +352,8 @@ impl VanillaGenerator {
             dimension,
             settings,
             surface_rule,
+            lava_y: -54,
+            vein_y: (-60, 52),
             biome_supplier,
             biome_mixer_seed,
             terrain_cache,
@@ -284,6 +362,7 @@ impl VanillaGenerator {
             structure_calculator: StructurePlacementCalculator::new(seed.0 as i64),
             structure_allowed_biomes,
             enabled_structure_sets,
+            structure_sets: StructureSet::ALL.iter().collect(),
             uniform_carvers,
             possible_biomes,
         }

@@ -203,7 +203,7 @@ impl SpawnCosts {
 }
 
 /// Optional modifier that adjusts how biome temperature behaves (e.g. frozen biomes).
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 enum TemperatureModifier {
     /// No modification; temperature is used as-is.
@@ -304,6 +304,245 @@ struct MultiNoiseBiomeSuppliers {
     nether: BiomeTree,
 }
 
+fn emit_biome(
+    name: &str,
+    format_name: &proc_macro2::Ident,
+    index: &LitInt,
+    be_network_id: u8,
+    biome: &Biome,
+) -> TokenStream {
+    let has_precipitation = biome.has_precipitation;
+    let temperature = biome.temperature;
+    let downfall = biome.downfall;
+    let carvers: Vec<TokenStream> = biome
+        .carvers
+        .iter()
+        .map(|c| {
+            let name = c.strip_prefix("minecraft:").unwrap_or(c);
+            let variant_name = format_ident!("{}", name.to_uppercase());
+            quote! { &crate::carver::#variant_name }
+        })
+        .collect();
+    let features: Vec<TokenStream> = biome
+        .features
+        .iter()
+        .map(|step| {
+            let step_features: Vec<TokenStream> = step
+                .iter()
+                .map(|f| {
+                    let name = f.strip_prefix("minecraft:").unwrap_or(f);
+                    let variant_name = format_ident!("{}", name.to_pascal_case());
+                    quote! { crate::placed_feature::PlacedFeature::#variant_name }
+                })
+                .collect();
+            quote! { &[#(#step_features),*] }
+        })
+        .collect();
+
+    let creature_spawn_probability = &biome.creature_spawn_probability.unwrap_or(0.1);
+
+    let temperature_modifier = biome
+        .temperature_modifier
+        .unwrap_or(TemperatureModifier::None);
+
+    let monster: Vec<_> = biome
+        .spawners
+        .monster
+        .iter()
+        .map(Spawner::to_tokens)
+        .collect();
+    let ambient: Vec<_> = biome
+        .spawners
+        .ambient
+        .iter()
+        .map(Spawner::to_tokens)
+        .collect();
+    let axolotls: Vec<_> = biome
+        .spawners
+        .axolotls
+        .iter()
+        .map(Spawner::to_tokens)
+        .collect();
+    let creature: Vec<_> = biome
+        .spawners
+        .creature
+        .iter()
+        .map(Spawner::to_tokens)
+        .collect();
+    let misc: Vec<_> = biome.spawners.misc.iter().map(Spawner::to_tokens).collect();
+    let underground_water_creature: Vec<_> = biome
+        .spawners
+        .underground_water_creature
+        .iter()
+        .map(Spawner::to_tokens)
+        .collect();
+    let water_ambient: Vec<_> = biome
+        .spawners
+        .water_ambient
+        .iter()
+        .map(Spawner::to_tokens)
+        .collect();
+    let water_creature: Vec<_> = biome
+        .spawners
+        .water_creature
+        .iter()
+        .map(Spawner::to_tokens)
+        .collect();
+
+    let spawners = quote! {
+        SpawnGroups {
+            monster: &[#(#monster),*],
+            ambient: &[#(#ambient),*],
+            axolotls: &[#(#axolotls),*],
+            creature: &[#(#creature),*],
+            misc: &[#(#misc),*],
+            underground_water_creature: &[#(#underground_water_creature),*],
+            water_ambient: &[#(#water_ambient),*],
+            water_creature: &[#(#water_creature),*],
+        }
+    };
+
+    let spawn_costs: Vec<_> = biome
+        .spawn_costs
+        .iter()
+        .map(|(name, cost)| {
+            let cost_token = cost.to_tokens();
+            let entity_type = name.strip_prefix("minecraft:").unwrap();
+            quote! {
+                #entity_type => #cost_token
+            }
+        })
+        .collect();
+
+    let temperature_modifier = match temperature_modifier {
+        TemperatureModifier::Frozen => quote! { TemperatureModifier::Frozen },
+        TemperatureModifier::None => quote! { TemperatureModifier::None },
+    };
+
+    quote! {
+        pub const #format_name: Biome = Biome {
+            id: #index,
+            registry_id: #name,
+            be_network_id: #be_network_id,
+            weather: Weather::new(
+                 #has_precipitation,
+                 #temperature,
+                 #temperature_modifier,
+                 #downfall
+            ),
+            features: &[#(#features),*],
+            carvers: &[#(#carvers),*],
+            creature_spawn_probability: #creature_spawn_probability,
+            spawners: #spawners,
+            spawn_costs: phf::phf_map! {
+                #(#spawn_costs),*
+            },
+        };
+    }
+}
+
+pub fn build_profile(
+    data: &std::path::Path,
+    overworld_climate: &Value,
+    nether_climate: &Value,
+    bedrock_ids: &BTreeMap<String, u8>,
+) -> TokenStream {
+    use crate::noise_settings::ParameterPointStruct;
+    let files = crate::profile_resources::files(data, "worldgen/biome")
+        .expect("Cannot enumerate staged biomes");
+    let vanilla_count = files
+        .keys()
+        .filter(|name| name.starts_with("minecraft:"))
+        .count();
+    let placed = crate::profile_resources::files(data, "worldgen/placed_feature")
+        .expect("Cannot enumerate staged placed features");
+    let mut defs = Vec::new();
+    let mut name_arms = Vec::new();
+    let mut id_arms = Vec::new();
+    let mut custom_json = Vec::new();
+    let mut aliases = BTreeMap::new();
+
+    for (index, (name, path)) in files
+        .iter()
+        .filter(|(name, _)| !name.starts_with("minecraft:"))
+        .enumerate()
+    {
+        let value = crate::profile_resources::read_json(path);
+        let mut biome: Biome = serde_json::from_value(value.clone())
+            .unwrap_or_else(|error| panic!("Invalid biome {name}: {error}"));
+        biome.apply_natural_mob_spawns();
+        // Decoration and carver registries are still the vanilla set.
+        biome.carvers.clear();
+        for step in &mut biome.features {
+            for feature in step.iter() {
+                let id = if feature.contains(':') {
+                    feature.clone()
+                } else {
+                    format!("minecraft:{feature}")
+                };
+                assert!(
+                    placed.contains_key(&id),
+                    "Missing placed feature {id} for {name}"
+                );
+            }
+            step.clear();
+        }
+        let raw_id =
+            u8::try_from(vanilla_count + index).expect("Too many biomes for the chunk palette");
+        let index = LitInt::new(&raw_id.to_string(), Span::call_site());
+        let ident = format_ident!("{}", name.to_shouty_snake_case());
+        defs.push(emit_biome(name, &ident, &index, bedrock_ids[name], &biome));
+        name_arms.push(quote! { #name => Some(&Biome::#ident), });
+        id_arms.push(quote! { #index => Some(&Biome::#ident), });
+        aliases.insert(name.as_str(), ident);
+        let json = value.to_string();
+        custom_json.push(quote! { (#name, #json), });
+    }
+
+    let climate = |entries: &Value| {
+        entries
+            .as_array()
+            .expect("Missing climate table")
+            .iter()
+            .map(|entry| {
+                let id = entry["biome"].as_str().expect("Invalid climate biome ID");
+                let params: ParameterPointStruct =
+                    serde_json::from_value(entry["parameters"].clone())
+                        .unwrap_or_else(|error| panic!("Invalid climate point for {id}: {error}"));
+                assert!(files.contains_key(id), "Missing climate biome {id}");
+                let ident = aliases.get(id).cloned().unwrap_or_else(|| {
+                    format_ident!(
+                        "{}",
+                        id.strip_prefix("minecraft:")
+                            .expect("Missing biome")
+                            .to_shouty_snake_case()
+                    )
+                });
+                quote! { (#params, &Biome::#ident), }
+            })
+            .collect::<Vec<_>>()
+    };
+    let overworld = climate(overworld_climate);
+    let nether = climate(nether_climate);
+    quote! {
+        use crate::biome::{Biome, SpawnGroups, Spawner, SpawnCosts, ParameterPoint};
+        use pumpkin_util::biome::{Weather, TemperatureModifier};
+
+        impl Biome {
+            #(#defs)*
+        }
+        pub const PROFILE_BIOMES: &[(&str, &str)] = &[#(#custom_json)*];
+        pub const TERRALITH_CLIMATE: &[(ParameterPoint, &Biome)] = &[#(#overworld)*];
+        pub const INCENDIUM_CLIMATE: &[(ParameterPoint, &Biome)] = &[#(#nether)*];
+        pub fn biome_by_name(name: &str) -> Option<&'static Biome> {
+            match name { #(#name_arms)* _ => None }
+        }
+        pub const fn biome_by_id(id: u8) -> Option<&'static Biome> {
+            match id { #(#id_arms)* _ => None }
+        }
+    }
+}
+
 /// Generates the `TokenStream` for the `Biome` struct, its constants, lookup methods,
 /// the multi-noise biome source trees, and the `BiomeTree` search implementation.
 pub fn build() -> TokenStream {
@@ -352,135 +591,14 @@ pub fn build() -> TokenStream {
 
         // let full_name = format!("minecraft:{name}");
         let format_name = format_ident!("{}", name.to_shouty_snake_case());
-        let has_precipitation = biome.has_precipitation;
-        let temperature = biome.temperature;
-        let downfall = biome.downfall;
-        let carvers: Vec<TokenStream> = biome
-            .carvers
-            .iter()
-            .map(|c| {
-                let name = c.strip_prefix("minecraft:").unwrap_or(c);
-                let variant_name = format_ident!("{}", name.to_uppercase());
-                quote! { &crate::carver::#variant_name }
-            })
-            .collect();
-        let features: Vec<TokenStream> = biome
-            .features
-            .iter()
-            .map(|step| {
-                let step_features: Vec<TokenStream> = step
-                    .iter()
-                    .map(|f| {
-                        let name = f.strip_prefix("minecraft:").unwrap_or(f);
-                        let variant_name = format_ident!("{}", name.to_pascal_case());
-                        quote! { crate::placed_feature::PlacedFeature::#variant_name }
-                    })
-                    .collect();
-                quote! { &[#(#step_features),*] }
-            })
-            .collect();
-
-        let creature_spawn_probability = &biome.creature_spawn_probability.unwrap_or(0.1);
-
-        let temperature_modifier = biome
-            .temperature_modifier
-            .unwrap_or(TemperatureModifier::None);
-
-        let monster: Vec<_> = biome
-            .spawners
-            .monster
-            .iter()
-            .map(Spawner::to_tokens)
-            .collect();
-        let ambient: Vec<_> = biome
-            .spawners
-            .ambient
-            .iter()
-            .map(Spawner::to_tokens)
-            .collect();
-        let axolotls: Vec<_> = biome
-            .spawners
-            .axolotls
-            .iter()
-            .map(Spawner::to_tokens)
-            .collect();
-        let creature: Vec<_> = biome
-            .spawners
-            .creature
-            .iter()
-            .map(Spawner::to_tokens)
-            .collect();
-        let misc: Vec<_> = biome.spawners.misc.iter().map(Spawner::to_tokens).collect();
-        let underground_water_creature: Vec<_> = biome
-            .spawners
-            .underground_water_creature
-            .iter()
-            .map(Spawner::to_tokens)
-            .collect();
-        let water_ambient: Vec<_> = biome
-            .spawners
-            .water_ambient
-            .iter()
-            .map(Spawner::to_tokens)
-            .collect();
-        let water_creature: Vec<_> = biome
-            .spawners
-            .water_creature
-            .iter()
-            .map(Spawner::to_tokens)
-            .collect();
-
-        let spawners = quote! {
-            SpawnGroups {
-                monster: &[#(#monster),*],
-                ambient: &[#(#ambient),*],
-                axolotls: &[#(#axolotls),*],
-                creature: &[#(#creature),*],
-                misc: &[#(#misc),*],
-                underground_water_creature: &[#(#underground_water_creature),*],
-                water_ambient: &[#(#water_ambient),*],
-                water_creature: &[#(#water_creature),*],
-            }
-        };
-
-        let spawn_costs: Vec<_> = biome
-            .spawn_costs
-            .iter()
-            .map(|(name, cost)| {
-                let cost_token = cost.to_tokens();
-                let entity_type = name.strip_prefix("minecraft:").unwrap();
-                quote! {
-                    #entity_type => #cost_token
-                }
-            })
-            .collect();
-
-        let temperature_modifier = match temperature_modifier {
-            TemperatureModifier::Frozen => quote! { TemperatureModifier::Frozen },
-            TemperatureModifier::None => quote! { TemperatureModifier::None },
-        };
         let index = LitInt::new(&biome.id.to_string(), Span::call_site());
-
-        variants.extend([quote! {
-            pub const #format_name: Biome = Biome {
-                id: #index,
-                registry_id: #name,
-                be_network_id: #be_network_id,
-                weather: Weather::new(
-                     #has_precipitation,
-                     #temperature,
-                     #temperature_modifier,
-                     #downfall
-                ),
-                features: &[#(#features),*],
-                carvers: &[#(#carvers),*],
-                creature_spawn_probability: #creature_spawn_probability,
-                spawners: #spawners,
-                spawn_costs: phf::phf_map! {
-                    #(#spawn_costs),*
-                },
-            };
-        }]);
+        variants.extend(emit_biome(
+            &name,
+            &format_name,
+            &index,
+            be_network_id,
+            &biome,
+        ));
 
         name_to_type.extend(quote! { #name => Some(&Self::#format_name), });
         id_to_type.extend(quote! { #index => Some(&Self::#format_name), });
@@ -595,14 +713,20 @@ pub fn build() -> TokenStream {
             pub fn from_name(name: &str) -> Option<&'static Self> {
                 match name {
                     #name_to_type
-                    _ => None
+                    #[cfg(all(feature = "material_rule", feature = "noise_settings", feature = "noise_router"))]
+                    _ => crate::worldgen_profile::biome_by_name(name),
+                    #[cfg(not(all(feature = "material_rule", feature = "noise_settings", feature = "noise_router")))]
+                    _ => None,
                 }
             }
 
             pub const fn from_id(id: u8) -> Option<&'static Self> {
                 match id {
                     #id_to_type
-                    _ => None
+                    #[cfg(all(feature = "material_rule", feature = "noise_settings", feature = "noise_router"))]
+                    _ => crate::worldgen_profile::biome_by_id(id),
+                    #[cfg(not(all(feature = "material_rule", feature = "noise_settings", feature = "noise_router")))]
+                    _ => None,
                 }
             }
         }

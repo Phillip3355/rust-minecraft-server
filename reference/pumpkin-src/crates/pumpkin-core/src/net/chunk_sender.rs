@@ -36,6 +36,7 @@ pub struct DispatchedChunk {
 }
 
 pub struct PreparedBatch {
+    worldgen_profile_enabled: bool,
     pub chunks: Vec<PreparedChunk>,
     pub epoch_snapshot: u32,
     /// Client protocol, only for batch flow -> chunks are always encoded as `CURRENT_MC_VERSION`.
@@ -265,6 +266,7 @@ impl ChunkSender {
         }
 
         Some(PreparedBatch {
+            worldgen_profile_enabled: level.world_gen.load().uses_worldgen_profile(),
             chunks: candidates,
             epoch_snapshot: epoch,
             target_version: version,
@@ -296,7 +298,7 @@ impl ChunkSender {
                 {
                     return None;
                 }
-                if CChunkData(chunk)
+                if CChunkData::with_profile(chunk, batch.worldgen_profile_enabled)
                     .write_packet_data(&mut chunk_buf, &CURRENT_MC_VERSION)
                     .is_err()
                 {
@@ -420,6 +422,7 @@ mod tests {
         let position = Vector2::new(3, -2);
         let chunk = ChunkData::empty_sync(position.x, position.y);
         let batch = PreparedBatch {
+            worldgen_profile_enabled: false,
             chunks: vec![PreparedChunk {
                 position,
                 chunk: chunk.clone(),
@@ -451,6 +454,7 @@ mod tests {
     fn bedrock_batch_ignores_a_stale_epoch() {
         let position = Vector2::new(3, -2);
         let batch = PreparedBatch {
+            worldgen_profile_enabled: false,
             chunks: vec![PreparedChunk {
                 position,
                 chunk: ChunkData::empty_sync(position.x, position.y),
@@ -472,6 +476,7 @@ mod tests {
     fn watchers_become_ready_on_their_own_delivery() {
         let position = Vector2::new(1, 4);
         let batch = PreparedBatch {
+            worldgen_profile_enabled: false,
             chunks: vec![PreparedChunk {
                 position,
                 chunk: ChunkData::empty_sync(position.x, position.y),
@@ -551,6 +556,7 @@ mod tests {
 
     fn batch_for(position: Vector2<i32>, epoch_snapshot: u32) -> PreparedBatch {
         PreparedBatch {
+            worldgen_profile_enabled: false,
             chunks: vec![PreparedChunk {
                 position,
                 chunk: ChunkData::empty_sync(position.x, position.y),

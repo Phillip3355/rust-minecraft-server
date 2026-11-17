@@ -38,6 +38,12 @@ pub fn register_dynamic_template_pool_json(
     id: &str,
     json: &str,
 ) -> Result<Arc<TemplatePool>, serde_json::Error> {
+    let pool = Arc::new(parse_template_pool(id, json)?);
+    DYNAMIC_POOLS.insert(pool.id.clone(), Arc::clone(&pool));
+    Ok(pool)
+}
+
+fn parse_template_pool(id: &str, json: &str) -> Result<TemplatePool, serde_json::Error> {
     let raw: RawTemplatePool = serde_json::from_str(json)?;
     let elements = raw
         .elements
@@ -57,13 +63,11 @@ pub fn register_dynamic_template_pool_json(
     } else {
         format!("minecraft:{id}")
     };
-    let pool = Arc::new(TemplatePool {
-        id: key.clone(),
+    Ok(TemplatePool {
+        id: key,
         fallback: raw.fallback,
         elements,
-    });
-    DYNAMIC_POOLS.insert(key, Arc::clone(&pool));
-    Ok(pool)
+    })
 }
 
 /// Clears all dynamically registered template pools (e.g. during datapack reload).
@@ -617,6 +621,18 @@ impl TemplatePool {
             return Some(pool);
         }
 
+        if let Some(json) = pumpkin_data::worldgen_profile::template_pool(&canonical_id) {
+            match parse_template_pool(&canonical_id, json) {
+                Ok(pool) => {
+                    let pool = Arc::new(pool);
+                    CACHE.insert(canonical_id, Arc::clone(&pool));
+                    return Some(pool);
+                }
+                Err(error) => {
+                    tracing::error!("Invalid compiled jigsaw pool {canonical_id}: {error}")
+                }
+            }
+        }
         None
     }
 
@@ -998,9 +1014,14 @@ impl JigsawGenerator {
             .and_then(|s| s.project_start_to_heightmap)
             .is_some();
 
-        let max_distance = structure
-            .and_then(|s| s.max_distance_from_center)
-            .unwrap_or(80); // Vanilla default is 80
+        let mut max_distance = MaxDistance::new(
+            structure
+                .and_then(|s| s.max_distance_from_center)
+                .unwrap_or(80),
+        );
+        if let Some(vertical) = structure.and_then(|s| s.max_vertical_distance) {
+            max_distance.vertical = vertical;
+        }
 
         let liquid_settings =
             structure
@@ -1058,7 +1079,7 @@ impl JigsawGenerator {
             start_pos,
             use_expansion_hack,
             project_start_to_heightmap,
-            &MaxDistance::new(max_distance),
+            &max_distance,
             dimension_padding,
             liquid_settings,
             &pool_alias_lookup,

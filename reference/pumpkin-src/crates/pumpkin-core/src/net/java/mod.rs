@@ -354,6 +354,7 @@ impl JavaClient {
             return;
         }
 
+        let worldgen_profile_enabled = server.level_info.load().worldgen_profile.is_some();
         let (tx, rx) = oneshot::channel();
         server.compute_pool.spawn(move || {
             let mut serialized = Vec::with_capacity(valid_chunks.len());
@@ -364,8 +365,8 @@ impl JavaClient {
                     error!("Failed to write chunk data id: {err:?}");
                     continue;
                 }
-                if let Err(err) =
-                    CChunkData(&chunk).write_packet_data(&mut buf, &CURRENT_MC_VERSION)
+                if let Err(err) = CChunkData::with_profile(&chunk, worldgen_profile_enabled)
+                    .write_packet_data(&mut buf, &CURRENT_MC_VERSION)
                 {
                     error!("Failed to write chunk data: {err:?}");
                     continue;

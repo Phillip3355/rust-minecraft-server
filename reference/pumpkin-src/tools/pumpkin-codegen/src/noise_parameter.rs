@@ -59,6 +59,26 @@ fn collect_noise_files(
     }
 }
 
+pub fn build_profile(noises: &BTreeMap<String, std::path::PathBuf>) -> TokenStream {
+    use heck::ToShoutySnakeCase;
+    let variants = noises.iter().enumerate().map(|(index, (raw_name, path))| {
+        let parameter: DoublePerlinNoiseParametersCodec = serde_json::from_value::<NoiseParameterJson>(
+            crate::profile_resources::read_json(path),
+        ).unwrap_or_else(|error| panic!("Failed to parse {}: {error}", path.display())).into();
+        let ident = format_ident!("{}", format!("profile/{raw_name}").to_shouty_snake_case());
+        let hash = md5::compute(raw_name.as_bytes());
+        let lo = u64::from_be_bytes(hash[0..8].try_into().unwrap());
+        let hi = u64::from_be_bytes(hash[8..16].try_into().unwrap());
+        let string_hash = pumpkin_util::math::java_string_hash(raw_name);
+        let amplitudes = &parameter.amplitudes;
+        let first_octave = parameter.first_octave;
+        quote! {
+            pub const #ident: Self = Self::new(Self::COUNT + #index, #first_octave, &[#(#amplitudes),*], #lo, #hi, #string_hash);
+        }
+    });
+    quote! { impl DoublePerlinNoiseParameters { #(#variants)* } }
+}
+
 pub fn build() -> TokenStream {
     let dir = std::path::Path::new("../../assets/datapack/data/minecraft/worldgen/noise");
     let mut json: BTreeMap<String, DoublePerlinNoiseParametersCodec> = BTreeMap::new();

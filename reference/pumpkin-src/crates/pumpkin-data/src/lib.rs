@@ -470,6 +470,13 @@ pub use block_state::{BlockState, BlockStateId};
 #[cfg(feature = "block")]
 pub use blocks::{Block, BlockId, SpawnFloorPredicate};
 
+#[cfg(all(
+    feature = "material_rule",
+    feature = "noise_settings",
+    feature = "noise_router"
+))]
+pub mod worldgen_profile;
+
 #[cfg(feature = "material_rule")]
 #[rustfmt::skip]
 #[path = "generated/material_rule.rs"]

@@ -513,7 +513,11 @@ fn write_biome<W: Write>(writer: &mut W, entry: &NbtCompound) -> Result<(), Erro
 fn encode_biome_definitions(document: &[u8]) -> Result<(Vec<u8>, usize), Error> {
     let root = read_gzip_compound_tag(Cursor::new(document))
         .map_err(|error| Error::new(ErrorKind::InvalidData, error))?;
-    let biomes = compounds(&root, "biomeData");
+    encode_biome_root(&root)
+}
+
+fn encode_biome_root(root: &NbtCompound) -> Result<(Vec<u8>, usize), Error> {
+    let biomes = compounds(root, "biomeData");
     if biomes.is_empty() {
         return Err(Error::new(
             ErrorKind::InvalidData,
@@ -554,4 +558,82 @@ pub fn build() -> TokenStream {
         pub const BIOME_DEFINITIONS: &[u8; #payload_len] = #payload;
         pub const BIOME_COUNT: usize = #biome_count;
     }
+}
+
+pub fn build_profile(
+    data: &std::path::Path,
+) -> (TokenStream, std::collections::BTreeMap<String, u8>) {
+    let vanilla = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets/bedrock/biome_definitions.nbt");
+    let document = fs::read(vanilla).expect("Missing base Bedrock biome registry");
+    let mut root =
+        read_gzip_compound_tag(Cursor::new(document)).expect("Invalid base Bedrock biome registry");
+    let mut entries = root
+        .get_list("biomeData")
+        .expect("Missing biomeData")
+        .to_vec();
+    let mut names = root
+        .get_list("biomeStringList")
+        .expect("Missing biomeStringList")
+        .to_vec();
+    let occupied = compounds(&root, "biomeData")
+        .into_iter()
+        .map(|entry| {
+            number(
+                entry.get_compound("data").expect("Missing biome data"),
+                "id",
+            )
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut available = (0..=u8::MAX).filter(|id| !occupied.contains(&i64::from(*id)));
+    let mut ids = std::collections::BTreeMap::new();
+    for (name, file) in crate::profile_resources::files(data, "worldgen/biome")
+        .expect("Cannot enumerate staged biomes")
+    {
+        if name.starts_with("minecraft:") {
+            continue;
+        }
+        let biome = crate::profile_resources::read_json(&file);
+        let id = available.next().expect("Too many Bedrock biome IDs");
+        let mut nbt = NbtCompound::new();
+        nbt.put_int("id", i32::from(id));
+        nbt.put_float(
+            "temperature",
+            biome["temperature"]
+                .as_f64()
+                .expect("Missing biome temperature") as f32,
+        );
+        nbt.put_float(
+            "downfall",
+            biome["downfall"].as_f64().expect("Missing biome downfall") as f32,
+        );
+        nbt.put_bool(
+            "rain",
+            biome["has_precipitation"]
+                .as_bool()
+                .expect("Missing biome precipitation"),
+        );
+        let water = &biome["effects"]["water_color"];
+        let rgb = water
+            .as_u64()
+            .or_else(|| u64::from_str_radix(water.as_str()?.strip_prefix('#')?, 16).ok());
+        if let Some(rgb) = rgb {
+            nbt.put_int("mapWaterColorARGB", (0xff00_0000_u32 | rgb as u32) as i32);
+        }
+        let mut entry = NbtCompound::new();
+        entry.put_int(
+            "index",
+            i32::try_from(names.len()).expect("Biome string table too large"),
+        );
+        entry.put_compound("data", nbt);
+        names.push(NbtTag::from(name.as_str()));
+        entries.push(NbtTag::Compound(entry));
+        ids.insert(name, id);
+    }
+    root.put_list("biomeData", entries);
+    root.put_list("biomeStringList", names);
+    let (payload, _) =
+        encode_biome_root(&root).expect("Cannot encode profile Bedrock biome registry");
+    let payload = Literal::byte_string(&payload);
+    (quote!(pub const BEDROCK_BIOMES: &[u8] = #payload;), ids)
 }

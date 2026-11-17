@@ -54,6 +54,7 @@ mod entity_status;
 mod entity_type;
 mod entity_variant;
 mod environment_attribute;
+mod extreme_height;
 mod flower_pot_transformations;
 mod fluid;
 mod frog_variant;
@@ -80,6 +81,7 @@ mod poi_type;
 mod potion;
 mod potion_brewing;
 mod processor_list;
+mod profile_resources;
 mod recipes;
 mod registry;
 mod scoreboard_slot;
@@ -133,6 +135,24 @@ pub fn main() {
             &std::path::absolute(output).expect("Cannot resolve profile output path"),
         ) {
             eprintln!("Worldgen profile staging failed: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if filters
+        .first()
+        .is_some_and(|arg| arg == "compile-worldgen-profile")
+    {
+        let [_, input, output] = filters.as_slice() else {
+            eprintln!(
+                "Usage: pumpkin-codegen compile-worldgen-profile STAGED_DIRECTORY OUTPUT_DIRECTORY"
+            );
+            std::process::exit(2);
+        };
+        if let Err(error) =
+            worldgen_profile::compile(std::path::Path::new(input), std::path::Path::new(output))
+        {
+            eprintln!("Worldgen profile compilation failed: {error}");
             std::process::exit(1);
         }
         return;
@@ -346,6 +366,7 @@ pub struct RustFmtError;
 /// or formatting fails.
 pub fn format_code(unformatted_code: &str) -> Result<String, RustFmtError> {
     let child_result = Command::new("rustfmt")
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

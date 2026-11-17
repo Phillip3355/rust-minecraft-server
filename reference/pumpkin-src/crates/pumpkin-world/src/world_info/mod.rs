@@ -10,6 +10,7 @@ use tracing::warn;
 
 pub mod anvil;
 pub mod data_files;
+pub mod worldgen_profile;
 
 // Constraint: disk biome palette serialization changed in 1.21.5
 pub const MINIMUM_SUPPORTED_WORLD_DATA_VERSION: i32 = 4435; // 1.21.9
@@ -77,6 +78,10 @@ pub struct LevelData {
     pub level_version: i32,
     #[serde(rename = "map_id", default)]
     pub map_id: i32,
+
+    /// Identity of the compiled generator required by this world.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worldgen_profile: Option<worldgen_profile::WorldgenProfile>,
 
     // These are NOT serialized to level.dat, but are still deserialized from it if present.
     // They are loaded and saved by AnvilLevelInfo via the data_files module.
@@ -278,6 +283,9 @@ impl WorldPreset {
     pub fn from_name(name: &str) -> Option<Self> {
         let name = name.strip_prefix("minecraft:").unwrap_or(name);
         let raw = match name {
+            worldgen_profile::EXTREME_PROFILE_ID | "pumpkin:terralith_incendium_extreme_v1" => {
+                include_str!("extreme_worldgen_v1.json")
+            }
             "normal" => Self::NORMAL_RAW,
             "amplified" => Self::AMPLIFIED_RAW,
             "large_biomes" => Self::LARGE_BIOMES_RAW,
@@ -565,6 +573,7 @@ impl LevelData {
             world_version: WorldVersion::default(),
             level_version: MAXIMUM_SUPPORTED_LEVEL_VERSION,
             map_id: 0,
+            worldgen_profile: None,
             // fields now in data/minecraft/*.dat
             game_rules: GameRuleRegistry::default(),
             world_gen_settings: WorldGenSettings::new(seed),
@@ -606,6 +615,10 @@ impl LevelData {
 pub enum WorldInfoError {
     #[error("Experimental worldgen profile {0} has no compiled generator")]
     UnavailableWorldgenProfile(String),
+    #[error("Experimental worldgen profile {0} is incomplete and cannot open a world")]
+    IncompleteWorldgenProfile(String),
+    #[error("World generation profile differs from the profile recorded in level.dat")]
+    WorldgenProfileMismatch,
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
     #[error("Info not found!")]

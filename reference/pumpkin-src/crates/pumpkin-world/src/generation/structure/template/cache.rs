@@ -99,6 +99,8 @@ impl TemplateCache {
             pumpkin_data::structure_template::get_structure_template(&key)
         {
             StructureTemplate::from_static(static_template)?
+        } else if let Some(bytes) = pumpkin_data::worldgen_profile::template(&key) {
+            StructureTemplate::from_nbt_bytes(bytes)?
         } else {
             return Err(TemplateError::MissingField("template file not found"));
         };

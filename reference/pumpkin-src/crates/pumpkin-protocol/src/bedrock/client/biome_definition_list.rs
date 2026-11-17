@@ -7,11 +7,11 @@ use crate::serial::PacketWrite;
 
 /// Sent by the server to synchronize all available biome definitions and properties with the client.
 #[packet(122)]
-pub struct CBiomeDefinitionList;
+pub struct CBiomeDefinitionList(pub Option<&'static [u8]>);
 
 impl PacketWrite for CBiomeDefinitionList {
     fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        writer.write_all(BIOME_DEFINITIONS)
+        writer.write_all(self.0.unwrap_or(BIOME_DEFINITIONS))
     }
 }
 

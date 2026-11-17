@@ -9455,6 +9455,17 @@ impl Biome {
             "windswept_hills" => Some(&Self::WINDSWEPT_HILLS),
             "windswept_savanna" => Some(&Self::WINDSWEPT_SAVANNA),
             "wooded_badlands" => Some(&Self::WOODED_BADLANDS),
+            #[cfg(all(
+                feature = "material_rule",
+                feature = "noise_settings",
+                feature = "noise_router"
+            ))]
+            _ => crate::worldgen_profile::biome_by_name(name),
+            #[cfg(not(all(
+                feature = "material_rule",
+                feature = "noise_settings",
+                feature = "noise_router"
+            )))]
             _ => None,
         }
     }
@@ -9527,6 +9538,17 @@ impl Biome {
             64 => Some(&Self::WINDSWEPT_HILLS),
             65 => Some(&Self::WINDSWEPT_SAVANNA),
             66 => Some(&Self::WOODED_BADLANDS),
+            #[cfg(all(
+                feature = "material_rule",
+                feature = "noise_settings",
+                feature = "noise_router"
+            ))]
+            _ => crate::worldgen_profile::biome_by_id(id),
+            #[cfg(not(all(
+                feature = "material_rule",
+                feature = "noise_settings",
+                feature = "noise_router"
+            )))]
             _ => None,
         }
     }

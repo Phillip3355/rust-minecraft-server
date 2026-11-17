@@ -2,7 +2,7 @@ use heck::ToShoutySnakeCase;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote};
 use serde::Deserialize;
-use std::{collections::BTreeMap, fs};
+use std::collections::BTreeMap;
 
 /// Deserialized block reference used in material rules.
 #[derive(Deserialize, Clone)]
@@ -10,9 +10,9 @@ use std::{collections::BTreeMap, fs};
 pub enum BlockStateCodecStruct {
     Name(String),
     Structured {
-        #[serde(rename = "Name")]
+        #[serde(rename = "Name", alias = "id")]
         name: String,
-        #[serde(rename = "Properties")]
+        #[serde(rename = "Properties", alias = "properties")]
         #[allow(dead_code)]
         properties: Option<BTreeMap<String, String>>,
     },
@@ -244,9 +244,11 @@ impl ToTokens for MaterialConditionStruct {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         match self {
             Self::Biome { biome_is } => {
-                let biomes = biome_is
-                    .iter()
-                    .map(|b| b.strip_prefix("minecraft:").unwrap_or(b).to_uppercase());
+                let biomes = biome_is.iter().map(|b| {
+                    b.strip_prefix("minecraft:")
+                        .unwrap_or(b)
+                        .to_shouty_snake_case()
+                });
                 let biome_refs: Vec<TokenStream> = biomes
                     .map(|b| {
                         let ident = format_ident!("{}", b);
@@ -269,7 +271,7 @@ impl ToTokens for MaterialConditionStruct {
                     "{}",
                     noise
                         .strip_prefix("minecraft:")
-                        .unwrap()
+                        .unwrap_or(noise)
                         .to_shouty_snake_case()
                 );
 
@@ -454,19 +456,35 @@ impl ToTokens for MaterialRuleStruct {
     }
 }
 
-pub fn resolve_condition(
+struct MaterialResources<'a> {
+    data: &'a std::path::Path,
+    profile_noises: Option<&'a BTreeMap<String, std::path::PathBuf>>,
+    extreme: bool,
+}
+
+impl MaterialResources<'_> {
+    fn read(&self, registry: &str, id: &str) -> serde_json::Value {
+        let path = crate::profile_resources::resource_path(self.data, registry, id);
+        let mut value = crate::profile_resources::read_json(&path);
+        if let Some(noises) = self.profile_noises {
+            crate::profile_resources::profile_noise_references(&mut value, "profile", noises);
+        }
+        if self.extreme {
+            crate::extreme_height::map_height_anchors(&mut value);
+        }
+        value
+    }
+}
+
+fn resolve_condition(
     raw: &RawMaterialCondition,
-    cond_dir: &std::path::Path,
+    resources: &MaterialResources<'_>,
 ) -> MaterialConditionStruct {
     match raw {
-        RawMaterialCondition::Ref(r) => {
-            let ref_name = r.strip_prefix("minecraft:").unwrap_or(r);
-            let path = cond_dir.join(format!("{}.json", ref_name));
-            let content = fs::read_to_string(&path)
-                .unwrap_or_else(|_| panic!("Failed to read condition file {:?}", path));
-            let parsed: RawMaterialCondition = serde_json::from_str(&content)
-                .unwrap_or_else(|e| panic!("Failed to parse condition file {:?}: {}", path, e));
-            resolve_condition(&parsed, cond_dir)
+        RawMaterialCondition::Ref(id) => {
+            let parsed = serde_json::from_value(resources.read("worldgen/material_condition", id))
+                .unwrap_or_else(|error| panic!("Invalid material condition {id}: {error}"));
+            resolve_condition(&parsed, resources)
         }
         RawMaterialCondition::Direct(direct) => match direct {
             DirectMaterialCondition::Biome { biome_is } => MaterialConditionStruct::Biome {
@@ -512,7 +530,7 @@ pub fn resolve_condition(
             DirectMaterialCondition::Temperature => MaterialConditionStruct::Temperature,
             DirectMaterialCondition::Steep => MaterialConditionStruct::Steep,
             DirectMaterialCondition::Not { invert } => MaterialConditionStruct::Not {
-                invert: Box::new(resolve_condition(invert, cond_dir)),
+                invert: Box::new(resolve_condition(invert, resources)),
             },
             DirectMaterialCondition::Hole => MaterialConditionStruct::Hole,
             DirectMaterialCondition::AbovePreliminarySurface => {
@@ -533,20 +551,15 @@ pub fn resolve_condition(
     }
 }
 
-pub fn resolve_rule(
+fn resolve_rule(
     raw: &RawMaterialRule,
-    rule_dir: &std::path::Path,
-    cond_dir: &std::path::Path,
+    resources: &MaterialResources<'_>,
 ) -> Option<MaterialRuleStruct> {
     match raw {
-        RawMaterialRule::Ref(r) => {
-            let ref_name = r.strip_prefix("minecraft:").unwrap_or(r);
-            let path = rule_dir.join(format!("{}.json", ref_name));
-            let content = fs::read_to_string(&path)
-                .unwrap_or_else(|_| panic!("Failed to read rule file {:?}", path));
-            let parsed: RawMaterialRule = serde_json::from_str(&content)
-                .unwrap_or_else(|e| panic!("Failed to parse rule file {:?}: {}", path, e));
-            resolve_rule(&parsed, rule_dir, cond_dir)
+        RawMaterialRule::Ref(id) => {
+            let parsed = serde_json::from_value(resources.read("worldgen/material_rule", id))
+                .unwrap_or_else(|error| panic!("Invalid material rule {id}: {error}"));
+            resolve_rule(&parsed, resources)
         }
         RawMaterialRule::Direct(direct) => match direct {
             DirectMaterialRule::Block { result_state } => Some(MaterialRuleStruct::Block {
@@ -555,15 +568,15 @@ pub fn resolve_rule(
             DirectMaterialRule::Sequence { sequence } => {
                 let resolved_seq: Vec<MaterialRuleStruct> = sequence
                     .iter()
-                    .filter_map(|r| resolve_rule(r, rule_dir, cond_dir))
+                    .filter_map(|r| resolve_rule(r, resources))
                     .collect();
                 Some(MaterialRuleStruct::Sequence {
                     sequence: resolved_seq,
                 })
             }
             DirectMaterialRule::Condition { if_true, then_run } => {
-                let cond = resolve_condition(if_true, cond_dir);
-                let resolved_then = resolve_rule(then_run, rule_dir, cond_dir)?;
+                let cond = resolve_condition(if_true, resources);
+                let resolved_then = resolve_rule(then_run, resources)?;
                 Some(MaterialRuleStruct::Condition {
                     if_true: cond,
                     then_run: Box::new(resolved_then),
@@ -594,12 +607,48 @@ pub fn resolve_rule(
     }
 }
 
+pub fn build_profile(
+    data: &std::path::Path,
+    overworld: &serde_json::Value,
+    nether: &serde_json::Value,
+    noises: &BTreeMap<String, std::path::PathBuf>,
+) -> TokenStream {
+    [
+        ("EXTREME_OVERWORLD_SURFACE", overworld, true),
+        ("INCENDIUM_NETHER_SURFACE", nether, false),
+    ]
+    .into_iter()
+    .map(|(name, settings, extreme)| {
+        let resources = MaterialResources {
+            data,
+            profile_noises: Some(noises),
+            extreme,
+        };
+        let mut value = settings
+            .get("surface_rule")
+            .or_else(|| settings.get("material_rule"))
+            .expect("Missing profile surface rule")
+            .clone();
+        crate::profile_resources::profile_noise_references(&mut value, "profile", noises);
+        if extreme {
+            crate::extreme_height::map_height_anchors(&mut value);
+        }
+        let raw: RawMaterialRule =
+            serde_json::from_value(value).expect("Invalid inline surface rule");
+        let rule = resolve_rule(&raw, &resources).expect("Cannot resolve profile material rule");
+        let ident = format_ident!("{name}");
+        quote! { pub const #ident: MaterialRule = #rule; }
+    })
+    .collect()
+}
+
 /// Reads material_rule files and resolves conditions from material_condition folder.
 pub fn build() -> TokenStream {
-    let rule_dir =
-        std::path::Path::new("../../assets/datapack/data/minecraft/worldgen/material_rule");
-    let cond_dir =
-        std::path::Path::new("../../assets/datapack/data/minecraft/worldgen/material_condition");
+    let resources = MaterialResources {
+        data: std::path::Path::new("../../assets/datapack/data"),
+        profile_noises: None,
+        extreme: false,
+    };
 
     let top_level_rules = [
         "bedrock_floor",
@@ -615,7 +664,7 @@ pub fn build() -> TokenStream {
 
     for rule_name in top_level_rules {
         let raw = RawMaterialRule::Ref(format!("minecraft:{}", rule_name));
-        let resolved = resolve_rule(&raw, rule_dir, cond_dir)
+        let resolved = resolve_rule(&raw, &resources)
             .unwrap_or_else(|| panic!("Failed to resolve material rule {}", rule_name));
 
         let const_ident = format_ident!("{}", rule_name.to_uppercase());

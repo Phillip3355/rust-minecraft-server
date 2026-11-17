@@ -86,8 +86,11 @@ pub fn stage(vanilla: &Path, terralith: &Path, incendium: &Path, output: &Path) 
         "status": "codegen_input",
         "pack_order": inputs.map(|(name, _)| name),
         "overworld_target": {
-            "min_y": -512, "height": 1024, "logical_height": 1024,
-            "ground_y": -400, "mountain_height": 800, "peak_y": 400,
+            "min_y": crate::extreme_height::MIN_Y,
+            "height": crate::extreme_height::HEIGHT, "logical_height": crate::extreme_height::HEIGHT,
+            "ground_y": crate::extreme_height::GROUND_Y,
+            "mountain_height": crate::extreme_height::PEAK_Y - crate::extreme_height::GROUND_Y,
+            "peak_y": crate::extreme_height::PEAK_Y,
             "terralith_climate_biomes": overworld_biomes
         },
         "nether_target": {
@@ -121,6 +124,164 @@ pub fn stage(vanilla: &Path, terralith: &Path, incendium: &Path, output: &Path) 
         fs::remove_dir_all(&output)?;
     }
     result
+}
+
+pub fn compile(staged: &Path, output: &Path) -> Result<()> {
+    let manifest_bytes = fs::read(staged.join("manifest.json"))?;
+    let manifest: Value = serde_json::from_slice(&manifest_bytes)?;
+    if manifest["profile"] != PROFILE
+        || manifest["version"] != 1
+        || manifest["status"] != "codegen_input"
+    {
+        return Err("Not a staged v1 Terralith/Incendium profile".into());
+    }
+    let data = staged.join("data");
+    let mut resources = Resources::new();
+    read_resources(&data, &data, &mut resources)?;
+    if manifest["output_sha256"] != serde_json::to_value(hashes(&resources))? {
+        return Err("Staged resources differ from the manifest".into());
+    }
+    let dimension =
+        |name: &str| parse_resource(&resources, &format!("minecraft/dimension/{name}.json"));
+    let settings = |dimension: &Value| -> Result<Value> {
+        let settings = dimension["generator"]["settings"]
+            .as_str()
+            .ok_or("Missing noise settings ID")?;
+        parse_resource(
+            &resources,
+            &resource_path("worldgen/noise_settings", settings),
+        )
+    };
+    let overworld_dimension = dimension("overworld")?;
+    let nether_dimension = dimension("the_nether")?;
+    let overworld = settings(&overworld_dimension)?;
+    let nether = settings(&nether_dimension)?;
+    let (bedrock_tokens, bedrock_ids) = crate::bedrock_biome::build_profile(&data);
+    let biome_tokens = crate::biome::build_profile(
+        &data,
+        &overworld_dimension["generator"]["biome_source"]["biomes"],
+        &nether_dimension["generator"]["biome_source"]["biomes"],
+        &bedrock_ids,
+    );
+    let structure_tokens = crate::structures::build_profile(&data);
+    let pack_json = |registry: &str| -> Result<proc_macro2::TokenStream> {
+        let entries = crate::profile_resources::files(&data, registry)?
+            .into_iter()
+            .filter(|(name, _)| !name.starts_with("minecraft:"))
+            .map(|(name, file)| {
+                let json = fs::read_to_string(file)?;
+                Ok(quote::quote! { #name => Some(#json), })
+            })
+            .collect::<std::io::Result<Vec<_>>>()?;
+        Ok(quote::quote! { #(#entries)* })
+    };
+    let pools = pack_json("worldgen/template_pool")?;
+    let processors = pack_json("worldgen/processor_list")?;
+    let mut template_bytes = Vec::new();
+    let mut templates = Vec::new();
+    for (path, bytes) in &resources {
+        let Some((namespace, path)) = path.split_once('/') else {
+            continue;
+        };
+        if namespace == "minecraft" {
+            continue;
+        }
+        let Some(path) = path
+            .strip_prefix("structure/")
+            .and_then(|name| name.strip_suffix(".nbt"))
+        else {
+            continue;
+        };
+        let name = format!("{namespace}:{path}");
+        let offset = template_bytes.len();
+        template_bytes.extend_from_slice(bytes);
+        let end = template_bytes.len();
+        templates.push(quote::quote! { #name => TEMPLATE_BYTES.get(#offset..#end), });
+    }
+    let noises = crate::profile_resources::files(&data, "worldgen/noise")?;
+    let noise_tokens = crate::noise_parameter::build_profile(&noises);
+    let settings_tokens = crate::noise_settings::build_profile(overworld.clone(), nether.clone());
+    let material_tokens = crate::material_rule::build_profile(&data, &overworld, &nether, &noises);
+    let router_tokens = crate::noise_router::build_profile(&data, overworld, nether, &noises);
+    let mut digest = Sha256::new();
+    for (path, hash) in hashes(&resources) {
+        digest.update(path.as_bytes());
+        digest.update([0]);
+        digest.update(hash.as_bytes());
+    }
+    let input_sha256 = digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let overworld_min = crate::extreme_height::MIN_Y;
+    let overworld_height = crate::extreme_height::HEIGHT;
+    let lava_y = crate::extreme_height::map_y(-54);
+    let min_vein_y = crate::extreme_height::map_y(-60);
+    let max_vein_y = crate::extreme_height::map_y(52);
+    let sources = quote::quote! {
+        use crate::noise_router::*;
+        use crate::material_rule::*;
+        use pumpkin_util::y_offset::{YOffset, Absolute, AboveBottom, BelowTop, RelativeToSeaLevel};
+        use crate::noise_settings::{NoiseSettings, GenerationShapeConfig};
+        use crate::noise_parameter::DoublePerlinNoiseParameters;
+        #noise_tokens
+        #settings_tokens
+        #router_tokens
+        #biome_tokens
+        #material_tokens
+        #bedrock_tokens
+        #structure_tokens
+
+        const TEMPLATE_BYTES: &[u8] = include_bytes!("templates.bin");
+        pub fn template(name: &str) -> Option<&'static [u8]> {
+            match name { #(#templates)* _ => None }
+        }
+        pub fn template_pool(name: &str) -> Option<&'static str> {
+            match name { #pools _ => None }
+        }
+        pub fn processors(name: &str) -> Option<&'static str> {
+            match name { #processors _ => None }
+        }
+
+        pub static TERRAIN_PROFILE: super::TerrainProfile = super::TerrainProfile {
+            input_sha256: #input_sha256,
+            overworld: super::ProfileDimension {
+                dimension: crate::dimension::Dimension {
+                    min_y: #overworld_min, height: #overworld_height, logical_height: #overworld_height,
+                    ..crate::dimension::Dimension::OVERWORLD
+                },
+                router: &EXTREME_OVERWORLD_ROUTER,
+                climate: TERRALITH_CLIMATE,
+                settings: &EXTREME_OVERWORLD_SETTINGS,
+                surface: &EXTREME_OVERWORLD_SURFACE,
+                lava_y: #lava_y,
+                vein_y: (#min_vein_y, #max_vein_y),
+            },
+            nether: super::ProfileDimension {
+                dimension: crate::dimension::Dimension {
+                    logical_height: 192,
+                    ..crate::dimension::Dimension::THE_NETHER
+                },
+                router: &INCENDIUM_NETHER_ROUTER,
+                climate: INCENDIUM_CLIMATE,
+                settings: &INCENDIUM_NETHER_SETTINGS,
+                surface: &INCENDIUM_NETHER_SURFACE,
+                lava_y: -54,
+                vein_y: (-60, 52),
+            },
+        };
+    };
+    let source = crate::format_code(&sources.to_string())
+        .map_err(|_| "Cannot format compiled profile source")?;
+    fs::create_dir(output)?;
+    if let Err(error) = fs::write(output.join("worldgen_profile.rs"), source)
+        .and_then(|()| fs::write(output.join("templates.bin"), template_bytes))
+    {
+        fs::remove_dir_all(output)?;
+        return Err(error.into());
+    }
+    Ok(())
 }
 
 fn read_resources(root: &Path, directory: &Path, resources: &mut Resources) -> Result<()> {

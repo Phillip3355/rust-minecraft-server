@@ -9,9 +9,9 @@ use std::{collections::BTreeMap, fs};
 pub enum BlockStateCodecStruct {
     Name(String),
     Structured {
-        #[serde(rename = "Name")]
+        #[serde(rename = "Name", alias = "id")]
         name: String,
-        #[serde(rename = "Properties")]
+        #[serde(rename = "Properties", alias = "properties")]
         #[allow(dead_code)]
         properties: Option<BTreeMap<String, String>>,
     },
@@ -244,6 +244,75 @@ impl ToTokens for NoiseSettingsStruct {
     }
 }
 
+fn settings_from_json(noise_settings: NoiseSettingsFileStruct, stem: &str) -> NoiseSettingsStruct {
+    let aquifers_enabled =
+        noise_settings.aquifers.is_some() || noise_settings.aquifers_enabled.unwrap_or(false);
+    let ore_veins_enabled = noise_settings.ore_veins_enabled.unwrap_or(aquifers_enabled);
+
+    let spawn_target: Vec<ParameterPointStruct> = noise_settings
+        .spawn_target
+        .iter()
+        .map(RawSpawnTarget::to_parameter_point)
+        .collect();
+
+    let (def_h, def_v) = match stem {
+        "end" | "floating_islands" => (2, 1),
+        _ => (1, 2),
+    };
+    let shape = GenerationShapeConfigStruct {
+        min_y: noise_settings.shape.min_y,
+        height: noise_settings.shape.height,
+        size_horizontal: if noise_settings.shape.size_horizontal != 0 {
+            noise_settings.shape.size_horizontal
+        } else {
+            def_h
+        },
+        size_vertical: if noise_settings.shape.size_vertical != 0 {
+            noise_settings.shape.size_vertical
+        } else {
+            def_v
+        },
+    };
+
+    NoiseSettingsStruct {
+        aquifers_enabled,
+        ore_veins_enabled,
+        legacy_random_source: noise_settings.legacy_random_source,
+        sea_level: noise_settings.sea_level,
+        default_fluid: noise_settings.default_fluid,
+        default_block: noise_settings.default_block,
+        shape,
+        spawn_target,
+    }
+}
+
+pub fn build_profile(overworld: serde_json::Value, nether: serde_json::Value) -> TokenStream {
+    let mut overworld = settings_from_json(
+        serde_json::from_value(overworld).expect("Invalid Terralith noise settings"),
+        "overworld",
+    );
+    assert_eq!(
+        (
+            overworld.shape.min_y,
+            overworld.shape.height,
+            overworld.sea_level
+        ),
+        (-64, 384, 63)
+    );
+    overworld.shape.min_y = crate::extreme_height::MIN_Y as i16;
+    overworld.shape.height = crate::extreme_height::HEIGHT as u16;
+    overworld.sea_level = crate::extreme_height::GROUND_Y;
+    let nether = settings_from_json(
+        serde_json::from_value(nether).expect("Invalid Incendium noise settings"),
+        "nether",
+    );
+    assert_eq!((nether.shape.min_y, nether.shape.height), (0, 192));
+    quote! {
+        pub const EXTREME_OVERWORLD_SETTINGS: NoiseSettings = #overworld;
+        pub const INCENDIUM_NETHER_SETTINGS: NoiseSettings = #nether;
+    }
+}
+
 /// Reads noise_settings files from datapack and generates NoiseSettings constants.
 pub fn build() -> TokenStream {
     let noise_settings_dir =
@@ -268,46 +337,7 @@ pub fn build() -> TokenStream {
         let noise_settings: NoiseSettingsFileStruct =
             serde_json::from_str(&content).expect("Failed to parse noise_settings JSON");
 
-        let aquifers_enabled =
-            noise_settings.aquifers.is_some() || noise_settings.aquifers_enabled.unwrap_or(false);
-        let ore_veins_enabled = noise_settings.ore_veins_enabled.unwrap_or(aquifers_enabled);
-
-        let spawn_target: Vec<ParameterPointStruct> = noise_settings
-            .spawn_target
-            .iter()
-            .map(RawSpawnTarget::to_parameter_point)
-            .collect();
-
-        let (def_h, def_v) = match stem.as_str() {
-            "end" | "floating_islands" => (2, 1),
-            _ => (1, 2),
-        };
-        let shape = GenerationShapeConfigStruct {
-            min_y: noise_settings.shape.min_y,
-            height: noise_settings.shape.height,
-            size_horizontal: if noise_settings.shape.size_horizontal != 0 {
-                noise_settings.shape.size_horizontal
-            } else {
-                def_h
-            },
-            size_vertical: if noise_settings.shape.size_vertical != 0 {
-                noise_settings.shape.size_vertical
-            } else {
-                def_v
-            },
-        };
-
-        let settings = NoiseSettingsStruct {
-            aquifers_enabled,
-            ore_veins_enabled,
-            legacy_random_source: noise_settings.legacy_random_source,
-            sea_level: noise_settings.sea_level,
-            default_fluid: noise_settings.default_fluid,
-            default_block: noise_settings.default_block,
-            shape,
-            spawn_target,
-        };
-
+        let settings = settings_from_json(noise_settings, &stem);
         json.insert(stem, settings);
     }
 

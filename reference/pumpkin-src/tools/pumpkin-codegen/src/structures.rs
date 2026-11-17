@@ -121,6 +121,13 @@ fn default_spawn_count() -> u32 {
     1
 }
 
+#[derive(Deserialize, Clone)]
+#[serde(untagged)]
+pub enum MaxDistanceFromCenter {
+    Horizontal(i32),
+    Axes { horizontal: i32, vertical: i32 },
+}
+
 /// Deserialized structure entry specifying its valid biomes and generation step.
 #[derive(Deserialize, Clone)]
 pub struct StructureStruct {
@@ -143,7 +150,7 @@ pub struct StructureStruct {
     /// Optional heightmap to project the start to.
     pub project_start_to_heightmap: Option<String>,
     /// Optional max distance from center.
-    pub max_distance_from_center: Option<i32>,
+    pub max_distance_from_center: Option<MaxDistanceFromCenter>,
     /// Optional liquid settings.
     pub liquid_settings: Option<String>,
     /// Optional dimension padding.
@@ -368,10 +375,16 @@ impl ToTokens for StructureStruct {
         } else {
             quote!(None)
         };
-        let max_distance_from_center = if let Some(m) = self.max_distance_from_center {
-            quote!(Some(#m))
-        } else {
-            quote!(None)
+        let (max_distance_from_center, max_vertical_distance) = match self.max_distance_from_center
+        {
+            Some(MaxDistanceFromCenter::Horizontal(horizontal)) => {
+                (quote!(Some(#horizontal)), quote!(None))
+            }
+            Some(MaxDistanceFromCenter::Axes {
+                horizontal,
+                vertical,
+            }) => (quote!(Some(#horizontal)), quote!(Some(#vertical))),
+            None => (quote!(None), quote!(None)),
         };
         let liquid_settings = if let Some(ls) = &self.liquid_settings {
             quote!(Some(#ls))
@@ -469,6 +482,7 @@ impl ToTokens for StructureStruct {
                 start_height: #start_height,
                 project_start_to_heightmap: #project_start_to_heightmap,
                 max_distance_from_center: #max_distance_from_center,
+                max_vertical_distance: #max_vertical_distance,
                 liquid_settings: #liquid_settings,
                 dimension_padding: #dimension_padding,
                 use_expansion_hack: #use_expansion_hack,
@@ -606,6 +620,9 @@ fn terrain_adaptation_to_token(ta: &str) -> TokenStream {
 }
 
 fn structure_key_to_token(key: &str) -> TokenStream {
+    if key.contains(':') && !key.starts_with("minecraft:") {
+        return quote!(StructureKeys::Pack(PackStructureKey(#key)));
+    }
     let stripped = key.strip_prefix("minecraft:").unwrap_or(key);
 
     match stripped {
@@ -703,6 +720,153 @@ fn generation_step_to_token(step: &str) -> TokenStream {
         "vegetal_decoration" => quote!(GenerationStep::VegetalDecoration),
         "top_layer_modification" => quote!(GenerationStep::TopLayerModification),
         _ => panic!("Unknown generation step: {step}"),
+    }
+}
+
+pub fn build_profile(data: &std::path::Path) -> TokenStream {
+    use crate::profile_resources::{files, read_json, resource_path};
+    use serde_json::Value;
+    use std::collections::BTreeSet;
+
+    fn canonical(id: &str) -> String {
+        if id.contains(':') {
+            id.to_owned()
+        } else {
+            format!("minecraft:{id}")
+        }
+    }
+
+    fn expand(
+        data: &std::path::Path,
+        value: &Value,
+        required: bool,
+        ids: &BTreeMap<String, u16>,
+        visited: &mut BTreeSet<String>,
+        output: &mut BTreeSet<u16>,
+    ) {
+        match value {
+            Value::String(name) if name.starts_with('#') => {
+                let key = canonical(&name[1..]);
+                let file = resource_path(data, "tags/worldgen/biome", &key);
+                if required || file.is_file() {
+                    assert!(visited.insert(key.clone()), "Recursive biome tag {key}");
+                    expand(
+                        data,
+                        &read_json(&file)["values"],
+                        true,
+                        ids,
+                        visited,
+                        output,
+                    );
+                    visited.remove(&key);
+                }
+            }
+            Value::String(name) => {
+                if let Some(id) = ids.get(&canonical(name)) {
+                    output.insert(*id);
+                } else {
+                    assert!(!required, "Missing biome {name}");
+                }
+            }
+            Value::Array(values) => {
+                for value in values {
+                    expand(data, value, true, ids, visited, output);
+                }
+            }
+            Value::Object(fields) => {
+                expand(
+                    data,
+                    &fields["id"],
+                    fields
+                        .get("required")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(true),
+                    ids,
+                    visited,
+                    output,
+                );
+            }
+            _ => panic!("Invalid structure biome selector: {value}"),
+        }
+    }
+
+    let biome_files = files(data, "worldgen/biome").expect("Cannot enumerate staged biomes");
+    let ids = biome_files
+        .keys()
+        .filter(|key| key.starts_with("minecraft:"))
+        .chain(
+            biome_files
+                .keys()
+                .filter(|key| !key.starts_with("minecraft:")),
+        )
+        .enumerate()
+        .map(|(index, id)| (id.clone(), u16::try_from(index).unwrap()))
+        .collect();
+    let structures = files(data, "worldgen/structure").expect("Cannot enumerate staged structures");
+    let sets =
+        files(data, "worldgen/structure_set").expect("Cannot enumerate staged structure sets");
+    let pools = files(data, "worldgen/template_pool").expect("Cannot enumerate staged pools");
+    let mut defs = Vec::new();
+    let mut names = Vec::new();
+    for (id, file) in structures
+        .iter()
+        .filter(|(id, _)| !id.starts_with("minecraft:"))
+    {
+        let mut value = read_json(file);
+        let mut allowed = BTreeSet::new();
+        expand(
+            data,
+            &value["biomes"],
+            true,
+            &ids,
+            &mut BTreeSet::new(),
+            &mut allowed,
+        );
+        let allowed = allowed.into_iter().collect::<Vec<_>>();
+        let start_pool = value["start_pool"]
+            .as_str()
+            .expect("Pack structure must have a start pool");
+        assert!(
+            pools.contains_key(&canonical(start_pool)),
+            "Missing start pool {start_pool} for {id}"
+        );
+        if id.starts_with("terralith:")
+            && value["project_start_to_heightmap"].is_null()
+            && let Some(start) = value.get_mut("start_height")
+        {
+            crate::extreme_height::map_height_anchors(start);
+        }
+        value["biomes"] = Value::String(String::new());
+        let structure: StructureStruct = serde_json::from_value(value)
+            .unwrap_or_else(|error| panic!("Invalid structure {id}: {error}"));
+        let key = structure_key_to_token(id);
+        names.push(id);
+        defs.push(quote! { #id => Some((#key, &#structure, &[#(#allowed),*])), });
+    }
+
+    let sets = sets
+        .iter()
+        .filter(|(id, _)| !id.starts_with("minecraft:") || *id == "minecraft:nether_complexes")
+        .map(|(id, file)| {
+            let set: StructureSetStruct = serde_json::from_value(read_json(file))
+                .unwrap_or_else(|error| panic!("Invalid structure set {id}: {error}"));
+            for entry in &set.structures {
+                assert!(
+                    structures.contains_key(&canonical(&entry.structure)),
+                    "Unknown structure {}",
+                    entry.structure
+                );
+            }
+            quote! { (#id, &#set), }
+        })
+        .collect::<Vec<_>>();
+    quote! {
+        use crate::structures::*;
+        pub const PROFILE_STRUCTURE_NAMES: &[&str] = &[#(#names),*];
+        pub const PROFILE_STRUCTURE_SETS: &[(&str, &StructureSet)] = &[#(#sets)*];
+        pub fn structure(name: &str) -> Option<(StructureKeys, &'static Structure, &'static [u16])> {
+            match name { #(#defs)* _ => None }
+        }
     }
 }
 
@@ -813,7 +977,11 @@ pub fn build() -> TokenStream {
         use pumpkin_util::y_offset::{AboveBottom, Absolute, BelowTop, RelativeToSeaLevel, YOffset};
 
         #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+        pub struct PackStructureKey(pub(crate) &'static str);
+
+        #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
         pub enum StructureKeys {
+            Pack(PackStructureKey),
             PillagerOutpost,
             Mineshaft,
             MineshaftMesa,
@@ -873,6 +1041,9 @@ pub fn build() -> TokenStream {
                 let name = name.strip_prefix("minecraft:").unwrap_or(name);
                 match name {
                     #(#structure_from_name_arms)*
+                    #[cfg(all(feature = "material_rule", feature = "noise_settings", feature = "noise_router"))]
+                    _ => crate::worldgen_profile::structure(name).map(|(key, _, _)| key),
+                    #[cfg(not(all(feature = "material_rule", feature = "noise_settings", feature = "noise_router")))]
                     _ => None,
                 }
             }
@@ -880,6 +1051,7 @@ pub fn build() -> TokenStream {
             #[must_use]
             pub const fn to_name(&self) -> &'static str {
                 match self {
+                    Self::Pack(key) => key.0,
                     #(#structure_to_name_arms)*
                 }
             }
@@ -1136,6 +1308,7 @@ pub fn build() -> TokenStream {
             pub start_height: Option<HeightProvider>,
             pub project_start_to_heightmap: Option<&'static str>,
             pub max_distance_from_center: Option<i32>,
+            pub max_vertical_distance: Option<i32>,
             pub liquid_settings: Option<&'static str>,
             pub dimension_padding: Option<i32>,
             pub use_expansion_hack: Option<bool>,
@@ -1186,8 +1359,15 @@ pub fn build() -> TokenStream {
             #structure_const_defs
 
             #[must_use]
-            pub const fn get(key: &StructureKeys) -> &'static Self {
+            pub fn get(key: &StructureKeys) -> &'static Self {
                 match *key {
+                    StructureKeys::Pack(key) => {
+                        #[cfg(all(feature = "material_rule", feature = "noise_settings", feature = "noise_router"))]
+                        if let Some((_, structure, _)) = crate::worldgen_profile::structure(key.0) {
+                            return structure;
+                        }
+                        unreachable!("Unregistered pack structure {}", key.0)
+                    }
                     #structure_lookup_arms
                 }
             }
@@ -1209,6 +1389,9 @@ pub fn build() -> TokenStream {
             pub fn get(name: &str) -> Option<&'static Self> {
                 match name {
                     #structure_set_lookup_arms
+                    #[cfg(all(feature = "material_rule", feature = "noise_settings", feature = "noise_router"))]
+                    _ => crate::worldgen_profile::structure_sets().iter().find_map(|(id, set)| (*id == name).then_some(*set)),
+                    #[cfg(not(all(feature = "material_rule", feature = "noise_settings", feature = "noise_router")))]
                     _ => None,
                 }
             }
