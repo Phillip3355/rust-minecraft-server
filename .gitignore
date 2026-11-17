@@ -1,4 +1,5 @@
 /.work/
 /tools/world-verify/target/
+/tools/datapack-audit/target/
 __pycache__/
 *.py[cod]

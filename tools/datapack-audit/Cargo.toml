@@ -1,0 +1,16 @@
+[package]
+name = "datapack-audit"
+version = "0.1.0"
+edition = "2021"
+description = "Phase 2 static audit: which parts of a Java datapack Pumpkin (eda69440) cannot parse, silently drops, or ignores"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# Same policy as world-verify: no crates.io dependencies so `cargo build --offline`
+# works in the sandbox. JSON is parsed in-tree; gzip comes from world-verify.
+[dependencies]
+world-verify = { path = "../world-verify" }
+
+[[bin]]
+name = "datapack-audit"
+path = "src/main.rs"

@@ -1,0 +1,45 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running unittests src/lib.rs (/home/phillip/.local/state/hermes-orchestrator/worktrees/814da399d7b94c9999451b15e9713d68/tools/datapack-audit/target/debug/build/datapack-audit/61df74fe168cfbef/out/datapack_audit-61df74fe168cfbef)
+
+running 4 tests
+test json::tests::rejects_what_serde_json_rejects ... ok
+test rustsrc::tests::extracts_serde_names ... ok
+test json::tests::parses_nested_and_escapes ... ok
+test rustsrc::tests::extracts_arms_from_named_fn_only ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (/home/phillip/.local/state/hermes-orchestrator/worktrees/814da399d7b94c9999451b15e9713d68/tools/datapack-audit/target/debug/build/datapack-audit/a53d8709805c146c/out/datapack_audit-a53d8709805c146c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/audit.rs (/home/phillip/.local/state/hermes-orchestrator/worktrees/814da399d7b94c9999451b15e9713d68/tools/datapack-audit/target/debug/build/datapack-audit/ab31b1bb9bfa52b6/out/audit-ab31b1bb9bfa52b6)
+
+running 16 tests
+test extracts_commands_including_aliases ... ok
+test extracts_runtime_structure_types ... ok
+test extracts_compiled_vanilla_ids_and_registry_tables ... ok
+test extracts_density_function_types_from_codegen ... ok
+test loot_capabilities_match_parser ... ok
+test reachability_helpers ... ok
+test flags_unknown_density_function_type_and_foreign_refs ... ok
+test json_and_nbt_failures_are_reported ... ok
+test loot_table_semantics_follow_pumpkin_parser ... ok
+test processor_list_with_custom_predicate_is_rejected ... ok
+test function_entrypoints_mirror_pumpkin_tag_handling ... ok
+test inline_placed_feature_refers_to_configured_feature ... ok
+test phase2_smoke_pack_is_statically_clean ... ok
+test zip_packs_are_flagged_not_loaded ... ok
+test template_pool_with_unknown_element_is_rejected ... ok
+test worldgen_registry_side_effects ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+   Doc-tests datapack_audit
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
