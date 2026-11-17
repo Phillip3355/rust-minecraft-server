@@ -1,0 +1,71 @@
+# Controlled Pumpkin 0.2.2+26.3-26.60 configuration template
+# Reference: docs.pumpkinmc.org/configuration (0.2.2 unified pumpkin.toml)
+seed = "${SEED}"
+default_difficulty = "${DIFFICULTY}"
+default_gamemode = "${GAMEMODE}"
+hardcore = false
+white_list = ${WHITE_LIST}
+enforce_whitelist = ${ENFORCE_WHITELIST}
+allow_nether = true
+allow_end = true
+spawn_protection = ${SPAWN_PROTECTION}
+
+[logging]
+enabled = true
+level = "info"
+threads = false
+thread_ids = false
+target = false
+color = false
+timestamp = true
+timestamp_format = "[hour]:[minute]:[second]"
+file = "latest.log"
+
+[commands]
+use_console = true
+use_tty = false
+log_console = true
+broadcast_console_to_ops = false
+default_op_level = 4
+
+[networking.java]
+enabled = true
+address = "${BIND_HOST}:${SERVER_PORT}"
+encryption = false
+online_mode = ${ONLINE_MODE}
+max_players = ${MAX_PLAYERS}
+view_distance = ${VIEW_DISTANCE}
+simulation_distance = ${SIMULATION_DISTANCE}
+keep_alive_time = 15
+motd = "Phase0 Benchmark Pumpkin 26.3"
+
+[networking.bedrock]
+enabled = false
+
+[networking.management]
+enabled = true
+address = "${BIND_HOST}:${MSMP_PORT}"
+secret = "${MSMP_SECRET}"
+allowed_origins = []
+status_heartbeat_interval = 0
+
+[networking.query]
+enabled = false
+
+[networking.lan_broadcast]
+enabled = false
+
+[networking.proxy]
+enabled = ${PROXY_ENABLED}
+
+[world]
+lighting = "default"
+autosave_ticks = 6000
+
+[world.chunk]
+type = "${CHUNK_FORMAT}"
+write_in_place = false
+
+[world.chunk.compression]
+algorithm = "LZ4"
+level = 6

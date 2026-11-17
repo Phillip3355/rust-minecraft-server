@@ -1,0 +1,13 @@
+{
+  "snapshot_id": "vanilla_overworld_r2048",
+  "status": "NOT_GENERATED",
+  "seed": 1790155153199293024,
+  "center": [0, 0],
+  "radius_blocks": 2048,
+  "generator": "Paper 26.3 + Chunky",
+  "paper_build": null,
+  "chunky_version": null,
+  "pumpkin_anvil_load_verified": false,
+  "sha256_manifest": "tests/performance/snapshots/vanilla_overworld_r2048.sha256",
+  "notes": "Placeholder manifest. Populate after running Golden Snapshot generation on an online Linux x86-64 host with Java 25+."
+}

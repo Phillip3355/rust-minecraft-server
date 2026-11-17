@@ -1,0 +1,22 @@
+# Controlled Paper 26.3 global config template
+# Note: Paper 26.3 may migrate new keys on first boot; keep controlled proxy & spark settings explicit.
+_version: 29
+proxies:
+  velocity:
+    enabled: ${VELOCITY_ENABLED}
+    online-mode: false
+    secret: "${VELOCITY_SECRET}"
+  proxy-protocol: false
+spark:
+  enabled: true
+  enable-immediately: false
+chunk-loading-advanced:
+  auto-config-send-distance: true
+  player-max-concurrent-chunk-generates: 0
+  player-max-concurrent-chunk-loads: 0
+chunk-loading-basic:
+  player-max-chunk-generate-rate: -1.0
+  player-max-chunk-load-rate: -100.0
+  player-max-chunk-send-rate: 75.0
+timings:
+  enabled: false

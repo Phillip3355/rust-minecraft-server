@@ -1,0 +1,152 @@
+# Phase 0 ~ Phase 7 Benchmark Manifest
+# Protocol spec: docs/BENCHMARK_PROTOCOL.md
+# Pumpkin baseline pin: scripts/pumpkin-pin.env
+
+[pin]
+pumpkin_repo = "https://github.com/Pumpkin-MC/Pumpkin.git"
+pumpkin_version = "0.2.2+26.3-26.60"
+pumpkin_commit = "eda69440e6369c5f8a05c3f69fc809c40dab93a6"
+pumpkin_binary = ".work/pumpkin-bin/pumpkin"
+
+paper_version = "26.3"
+paper_build = "latest" # Pin to exact integer build number once fetched via Fill v3 API
+paper_jar = ".work/benchmark/paper/paper-26.3.jar"
+chunky_jar = ".work/benchmark/paper/plugins/Chunky.jar"
+java_min_major = 25
+java_bin = "java"
+
+[seeds]
+# Fixed 64-bit integer seeds (never randomize across benchmark runs)
+vanilla_overworld = 1790155153199293024
+terralith = 421985374102938471
+incendium = -739201847261524391
+extreme_wg = 884719203847192837
+
+[environment]
+# Adjust server_cpus / bot_cpus to match physical host topology (never overlap cores)
+server_cpus = "0-3"
+bot_cpus = "4-7"
+use_systemd_cgroup = false # Set true if systemd-run --scope is available & desired
+ram_cap_mib = 4096
+jvm_heap_mib = 3072 # Fixed -Xms == -Xmx inside ram_cap_mib
+jvm_flags = [
+  "-XX:+UseZGC",
+  "-XX:+AlwaysPreTouch",
+  "-XX:+UnlockExperimentalVMOptions",
+  "-Dcom.mojang.eula.agree=true",
+]
+cache_mode = "warm" # "warm" or "cold" (cold requires root for drop_caches)
+bind_host = "127.0.0.1"
+server_port = 25565
+msmp_port = 25585
+msmp_secret = "phase0-local-bench-secret"
+proxy_mode = "standalone" # "standalone" | "velocity"
+velocity_forwarding_secret = "phase0-velocity-secret"
+results_dir = ".work/benchmark/results"
+workdir_root = ".work/benchmark/runs"
+snapshot_dir = ".work/benchmark/snapshots/vanilla_overworld_r2048"
+snapshot_manifest = "tests/performance/snapshots/vanilla_overworld_r2048.sha256"
+
+[defaults]
+view_distance = 10
+simulation_distance = 10
+difficulty = "normal"
+gamemode = "survival"
+online_mode = false
+white_list = false
+enforce_whitelist = false
+spawn_protection = 0
+max_players = 200
+repeats = 3
+sample_interval_sec = 1.0
+console_poll_interval_sec = 5.0
+ready_timeout_sec = 120
+stop_timeout_sec = 45
+
+[drivers]
+# Primary deterministic driver for S2/S3/S4: "soulfire" (26.3 native + CLI/SDK)
+# Lightweight stress fallback / S1-B idle driver: "botmark" (Pumpkin-MC/BotMark)
+# Custom Rust physics bot option: "azalea" (azalea-rs/azalea 26.3 branch)
+default_driver = "soulfire"
+botmark_bin = ".work/benchmark/tools/botmark"
+soulfire_jar = ".work/benchmark/tools/SoulFireCLI.jar"
+azalea_bin = ".work/benchmark/tools/azalea-bench"
+protocol_version = "26.3"
+join_delay_ms = 200
+
+[profiles.paper-baseline]
+engine = "paper"
+chunk_format = "anvil"
+description = "Paper 26.3 on Java 25+ (baseline control)"
+
+[profiles.pumpkin-native-anvil]
+engine = "pumpkin"
+chunk_format = "anvil"
+description = "Pumpkin 0.2.2+26.3-26.60 pure Rust with [world.chunk] type = anvil"
+
+[profiles.pumpkin-native-pump]
+engine = "pumpkin"
+chunk_format = "pump"
+description = "Pumpkin 0.2.2+26.3-26.60 pure Rust with [world.chunk] type = pump"
+
+[profiles.pumpkin-compat]
+engine = "pumpkin-compat"
+chunk_format = "anvil"
+description = "Phase 3+ Pumpkin + PatchBukkit (headless Paper JVM) — not active in Phase 0"
+
+[scenarios.S1-A]
+description = "Empty world static idle baseline (0 players)"
+world_mode = "snapshot"
+seed_key = "vanilla_overworld"
+driver = "none"
+driver_mode = "none"
+bot_count = 0
+warmup_sec = 60
+measure_sec = 180
+repeats = 3
+
+[scenarios.S1-B]
+description = "Idle baseline with 5 stationary connected clients"
+world_mode = "snapshot"
+seed_key = "vanilla_overworld"
+driver = "botmark"
+driver_mode = "idle"
+bot_count = 5
+warmup_sec = 60
+measure_sec = 180
+repeats = 3
+
+[scenarios.S2]
+description = "Pregenerated world tick load (N=25 deterministic walk & interact)"
+world_mode = "snapshot"
+seed_key = "vanilla_overworld"
+driver = "soulfire"
+driver_mode = "walk_interact"
+bot_count = 25
+warmup_sec = 120
+measure_sec = 300
+radius_blocks = 256
+repeats = 3
+
+[scenarios.S3]
+description = "Live chunk generation storm (radial exploration from empty world)"
+world_mode = "fresh"
+seed_key = "vanilla_overworld"
+driver = "soulfire"
+driver_mode = "radial_explore"
+bot_count = 8
+warmup_sec = 30
+measure_sec = 300
+repeats = 3
+
+[scenarios.S4]
+description = "Long-duration soak test + graceful/SIGKILL recovery check"
+world_mode = "snapshot"
+seed_key = "vanilla_overworld"
+driver = "soulfire"
+driver_mode = "walk_interact"
+bot_count = 25
+warmup_sec = 120
+measure_sec = 14400 # 4 hours minimum
+repeats = 1
+sigkill_recovery_check = true
