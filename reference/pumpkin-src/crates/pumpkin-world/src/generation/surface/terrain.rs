@@ -167,7 +167,8 @@ impl SurfaceTerrainBuilder {
 
             let scaled_threshold = threshold * threshold * 2.5;
             let transformed_roof = (pillar_roof_noise * 50.0).ceil() + 24.0;
-            let elevation = 64.0 + scaled_threshold.min(transformed_roof);
+            let elevation =
+                chunk.get_sea_level() as f32 + 1.0 + scaled_threshold.min(transformed_roof);
             let elevation_y = elevation.floor() as i32;
             if surface_y <= elevation_y {
                 for y in (chunk.bottom_y() as i32..=elevation_y).rev() {

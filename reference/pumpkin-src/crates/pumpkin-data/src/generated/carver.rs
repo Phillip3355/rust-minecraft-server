@@ -84,7 +84,7 @@ pub struct CarverConfig {
     pub additional: CarverAdditionalConfig,
 }
 use super::*;
-pub const CANYON: CarverConfig = CarverConfig {
+pub static CANYON: CarverConfig = crate::carver::CarverConfig {
     probability: 0.01f32,
     y: HeightProvider::Uniform(UniformHeightProvider {
         min_inclusive: YOffset::Absolute(Absolute { absolute: 10i16 }),
@@ -111,7 +111,7 @@ pub const CANYON: CarverConfig = CarverConfig {
         },
     }),
 };
-pub const CAVE: CarverConfig = CarverConfig {
+pub static CAVE: CarverConfig = crate::carver::CarverConfig {
     probability: 0.15f32,
     y: HeightProvider::Uniform(UniformHeightProvider {
         min_inclusive: YOffset::AboveBottom(AboveBottom { above_bottom: 8i8 }),
@@ -140,7 +140,7 @@ pub const CAVE: CarverConfig = CarverConfig {
         weird_thickness_bias: true,
     }),
 };
-pub const CAVE_EXTRA_UNDERGROUND: CarverConfig = CarverConfig {
+pub static CAVE_EXTRA_UNDERGROUND: CarverConfig = crate::carver::CarverConfig {
     probability: 0.07f32,
     y: HeightProvider::Uniform(UniformHeightProvider {
         min_inclusive: YOffset::AboveBottom(AboveBottom { above_bottom: 8i8 }),
@@ -169,7 +169,7 @@ pub const CAVE_EXTRA_UNDERGROUND: CarverConfig = CarverConfig {
         weird_thickness_bias: true,
     }),
 };
-pub const NETHER_CAVE: CarverConfig = CarverConfig {
+pub static NETHER_CAVE: CarverConfig = crate::carver::CarverConfig {
     probability: 0.2f32,
     y: HeightProvider::Uniform(UniformHeightProvider {
         min_inclusive: YOffset::Absolute(Absolute { absolute: 0i16 }),

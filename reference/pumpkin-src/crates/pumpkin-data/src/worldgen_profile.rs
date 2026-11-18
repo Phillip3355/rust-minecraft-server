@@ -7,6 +7,36 @@ use crate::{
     structures::{Structure, StructureKeys, StructureSet},
 };
 
+pub const CLEANROOM_PROFILE_ID: &str = "cleanroom_extreme_v1";
+pub const CLEANROOM_SETTINGS: &str = "cleanroom_extreme";
+pub const CLEANROOM_SETTINGS_REFERENCE: &str = "pumpkin:cleanroom_extreme";
+
+pub struct CleanroomProfile {
+    pub definition_sha256: &'static str,
+    pub dimension: Dimension,
+    pub dimension_json: &'static str,
+    pub settings: &'static NoiseSettings,
+    pub router: &'static BaseNoiseRouters,
+    pub surface: &'static MaterialRule,
+    pub carvers: [&'static crate::carver::CarverConfig; 3],
+    pub lava_y: i32,
+    pub lava_transition_y: i32,
+    pub vein_ranges: [(i32, i32); 2],
+}
+
+#[cfg(pumpkin_compiled_cleanroom)]
+mod cleanroom {
+    #![allow(unused_imports)]
+    include!(env!("PUMPKIN_CLEANROOM_SOURCE"));
+}
+
+pub fn cleanroom_profile() -> Option<&'static CleanroomProfile> {
+    #[cfg(pumpkin_compiled_cleanroom)]
+    return Some(&cleanroom::PROFILE);
+    #[cfg(not(pumpkin_compiled_cleanroom))]
+    None
+}
+
 pub struct TerrainProfile {
     pub input_sha256: &'static str,
     pub overworld: ProfileDimension,

@@ -207,7 +207,7 @@ impl Default for ExperimentalWorldgen {
     fn default() -> Self {
         Self {
             enabled: false,
-            profile: "terralith_incendium_extreme_v1".to_owned(),
+            profile: "cleanroom_extreme_v1".to_owned(),
         }
     }
 }

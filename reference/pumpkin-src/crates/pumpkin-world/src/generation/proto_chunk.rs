@@ -109,6 +109,7 @@ pub struct StandardChunkFluidLevelSampler {
     top_fluid: FluidLevel,
     bottom_fluid: FluidLevel,
     bottom_y: i32,
+    pub(crate) lava_transition_y: i32,
 }
 
 impl StandardChunkFluidLevelSampler {
@@ -121,7 +122,13 @@ impl StandardChunkFluidLevelSampler {
             top_fluid,
             bottom_fluid,
             bottom_y,
+            lava_transition_y: -10,
         }
+    }
+
+    pub(crate) fn with_lava_transition(mut self, y: i32) -> Self {
+        self.lava_transition_y = y;
+        self
     }
 }
 
@@ -155,6 +162,7 @@ pub struct ProtoChunk {
     bottom_y: i16,
     generation_height: u16,
     generation_bottom_y: i16,
+    pub(crate) cleanroom: bool,
     sea_level: i32,
     pub stage: StagedChunkEnum,
     pub light: ChunkLight,
@@ -269,6 +277,7 @@ impl ProtoChunk {
             bottom_y,
             generation_height,
             generation_bottom_y,
+            cleanroom: matches!(generator, super::generator::WorldGenerator::Noise(g) if g.cleanroom.is_some()),
             sea_level,
             stage: StagedChunkEnum::Empty,
             light: ChunkLight {
@@ -815,7 +824,8 @@ impl ProtoChunk {
                 Block::from_state_id(settings.default_fluid.id),
             ),
             FluidLevel::new(generator.lava_y, &Block::LAVA),
-        );
+        )
+        .with_lava_transition(generator.lava_transition_y);
 
         let mut beardifier_structures = Vec::new();
         let mut beardifier_junctions = Vec::new();
@@ -962,6 +972,7 @@ impl ProtoChunk {
             &surface_config,
             std::mem::take(&mut self.surface_height_cache),
         );
+        noise_sampler.set_vein_ranges(generator.vein_ranges);
         self.populate_noise(
             generator,
             &mut noise_sampler,
@@ -1225,6 +1236,7 @@ impl ProtoChunk {
             let mut vein_toggle = DensityBuffer::acquire(&volume);
             router.vein_toggle_volume(&mut vein_toggle, &volume);
             VeinContext {
+                vein_ranges: generator.vein_ranges,
                 volume,
                 vein_toggle,
                 vein_ridged: None,

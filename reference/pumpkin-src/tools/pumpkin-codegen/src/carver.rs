@@ -27,7 +27,7 @@ pub fn build() -> TokenStream {
     for (name, data) in carvers {
         let variant_name = format_ident!("{}", name.to_uppercase());
         let config = config(&data);
-        carver_instances.push(quote! { pub const #variant_name: CarverConfig = #config; });
+        carver_instances.push(quote! { pub static #variant_name: CarverConfig = #config; });
     }
 
     quote! {

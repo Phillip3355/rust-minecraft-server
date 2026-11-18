@@ -6,9 +6,21 @@ use pumpkin_util::{
 
 use crate::generation::noise::{VeinSample, router::chunk_noise_router::ChunkNoiseRouter};
 
-pub struct OreVeinSampler;
+pub struct OreVeinSampler {
+    ranges: [(i32, i32); 2],
+}
+
+pub const VANILLA_VEIN_RANGES: [(i32, i32); 2] = [(-60, -8), (0, 50)];
 
 impl OreVeinSampler {
+    pub const fn new(ranges: [(i32, i32); 2]) -> Self {
+        Self { ranges }
+    }
+
+    pub fn set_ranges(&mut self, ranges: [(i32, i32); 2]) {
+        self.ranges = ranges;
+    }
+
     #[must_use]
     pub fn sample(
         &self,
@@ -25,8 +37,9 @@ impl OreVeinSampler {
         };
 
         let block_y = pos.y;
-        let max_to_y = vein_type.max_y - block_y;
-        let y_to_min = block_y - vein_type.min_y;
+        let (min_y, max_y) = self.ranges[usize::from(vein_toggle > 0.0)];
+        let max_to_y = max_y - block_y;
+        let y_to_min = block_y - min_y;
         if (max_to_y >= 0) && (y_to_min >= 0) {
             let closest_to_bound = max_to_y.min(y_to_min);
             let mapped_diff = clamped_map(closest_to_bound as f32, 0.0, 20.0, -0.2, 0.0);
@@ -59,8 +72,6 @@ pub struct VeinType {
     ore: Block,
     raw_ore: Block,
     stone: Block,
-    min_y: i32,
-    max_y: i32,
 }
 
 // One of the victims of removing compile time blocks
@@ -72,16 +83,12 @@ pub mod vein_type {
         ore: Block::COPPER_ORE,
         raw_ore: Block::RAW_COPPER_BLOCK,
         stone: Block::GRANITE,
-        min_y: 0,
-        max_y: 50,
     };
     pub const IRON: VeinType = VeinType {
         ore: Block::DEEPSLATE_IRON_ORE,
         raw_ore: Block::RAW_IRON_BLOCK,
         stone: Block::TUFF,
-        min_y: -60,
-        max_y: -8,
     };
-    pub const MIN_Y: i32 = IRON.min_y;
-    pub const MAX_Y: i32 = COPPER.max_y;
+    pub const MIN_Y: i32 = super::VANILLA_VEIN_RANGES[0].0;
+    pub const MAX_Y: i32 = super::VANILLA_VEIN_RANGES[1].1;
 }

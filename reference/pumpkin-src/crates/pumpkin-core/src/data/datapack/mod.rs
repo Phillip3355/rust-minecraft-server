@@ -87,6 +87,7 @@ pub struct DatapackManager {
     damage_types: RwLock<DamageTypeRegistry>,
     loot_tables: RwLock<HashMap<String, Arc<DynamicLootTable>>>,
     dynamic_registries: RwLock<HashMap<String, HashMap<String, RegistryEntryData>>>,
+    cleanroom_dimension: Option<RegistryEntryData>,
     pub dynamic_registry_manager: Arc<dynamic_registry_manager::DynamicRegistryManager>,
     trade_registry: RwLock<TradeRegistry>,
     advancements: RwLock<HashMap<String, advancement_loader::DynamicAdvancementDefinition>>,
@@ -114,7 +115,22 @@ impl Default for DatapackManager {
 impl DatapackManager {
     #[must_use]
     pub fn new() -> Self {
+        Self::with_cleanroom(None)
+    }
+
+    pub(crate) fn with_cleanroom(
+        profile: Option<&pumpkin_data::worldgen_profile::CleanroomProfile>,
+    ) -> Self {
+        let cleanroom_dimension = profile.map(|profile| {
+            let json = serde_json::from_str(profile.dimension_json)
+                .expect("Codegen validated the Clean-room dimension JSON");
+            RegistryEntryData {
+                entry_id: "minecraft:overworld".into(),
+                data: Some(dynamic_registry_loader::json_to_registry_nbt_bytes(&json)),
+            }
+        });
         Self {
+            cleanroom_dimension,
             loaded_packs: RwLock::new(Vec::new()),
             functions: RwLock::new(HashMap::new()),
             function_tags: RwLock::new(HashMap::new()),
@@ -246,6 +262,13 @@ impl DatapackManager {
                 .entry("minecraft:damage_type".to_string())
                 .or_default()
                 .insert(id.clone(), entry.to_registry_entry());
+        }
+        if let Some(dimension) = &self.cleanroom_dimension {
+            let entries = all_dynamic_registries
+                .entry("minecraft:dimension_type".into())
+                .or_default();
+            entries.remove("overworld");
+            entries.insert(dimension.entry_id.clone(), dimension.clone());
         }
         self.dynamic_registry_manager
             .apply_custom_registries(&all_dynamic_registries);
@@ -2119,6 +2142,39 @@ fn load_recipes_from_dir(
 #[cfg(test)]
 mod tests {
     use super::DatapackManager;
+
+    #[test]
+    fn cleanroom_dimension_registry_survives_datapack_reload() {
+        let Some(profile) = pumpkin_data::worldgen_profile::cleanroom_profile() else {
+            return;
+        };
+        let root = tempfile::tempdir().unwrap();
+        let manager = DatapackManager::with_cleanroom(Some(profile));
+        let registry = &manager.dynamic_registry_manager;
+        let dimension = "minecraft:dimension_type";
+        let overworld = "minecraft:overworld";
+        let id = registry.get_raw_id(dimension, overworld).unwrap();
+        for _ in 0..2 {
+            manager.load_all(root.path(), &[], &super::RecipeManager::new());
+            let data = registry.get_entry_data(dimension, overworld).unwrap();
+            let mut cursor = std::io::Cursor::new(data.as_ref());
+            let nbt = pumpkin_nbt::Nbt::read_unnamed(
+                &mut pumpkin_nbt::deserializer::NbtReadHelperJava::new(&mut cursor),
+            )
+            .unwrap()
+            .root_tag;
+            assert_eq!(registry.get_raw_id(dimension, overworld), Some(id));
+            assert_eq!(nbt.get_int("min_y"), Some(-512));
+            assert_eq!(nbt.get_int("height"), Some(1024));
+            assert_eq!(nbt.get_int("logical_height"), Some(1024));
+            assert_eq!(
+                nbt.get_compound("attributes")
+                    .unwrap()
+                    .get_double("minecraft:visual/cloud_height"),
+                Some(432.0)
+            );
+        }
+    }
 
     #[test]
     fn function_dispatch_releases_the_functions_lock() {

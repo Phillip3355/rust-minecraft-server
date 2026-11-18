@@ -264,6 +264,11 @@ impl PlacementModifier {
             Self::CountOnEveryLayer(modifier) => modifier.get_positions(random, chunk, pos),
             Self::EnvironmentScan(modifier) => modifier.get_positions(chunk, block_registry, pos),
             Self::Heightmap(modifier) => modifier.get_positions(chunk, min_y, height, random, pos),
+            Self::HeightRange(modifier) if chunk.get_center_chunk().cleanroom => {
+                let mut pos = pos;
+                pos.0.y = modifier.height.cleanroom().get(random, min_y, height);
+                Box::new(iter::once(pos))
+            }
             Self::HeightRange(modifier) => modifier.get_positions(min_y, height, random, pos),
             Self::InSquare(_) => SquarePlacementModifier::get_positions(random, pos),
             Self::RandomOffset(modifier) => modifier.get_positions(random, pos),

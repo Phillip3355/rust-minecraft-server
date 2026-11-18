@@ -229,6 +229,10 @@ impl NoiseSettings {
     pub fn from_name(name: &str) -> Option<&'static Self> {
         let name = name.strip_prefix("minecraft:").unwrap_or(name);
         match name {
+            crate::worldgen_profile::CLEANROOM_SETTINGS
+            | crate::worldgen_profile::CLEANROOM_SETTINGS_REFERENCE => {
+                crate::worldgen_profile::cleanroom_profile().map(|profile| profile.settings)
+            }
             "overworld" => Some(&Self::OVERWORLD),
             "amplified" => Some(&Self::AMPLIFIED),
             "large_biomes" => Some(&Self::LARGE_BIOMES),

@@ -53,6 +53,34 @@ pub struct Dimension {
     pub timelines: Option<String>,
 }
 
+pub fn build_cleanroom(value: &serde_json::Value) -> serde_json::Result<TokenStream> {
+    let dim: Dimension = serde_json::from_value(value.clone())?;
+    let Dimension {
+        min_y,
+        height,
+        logical_height,
+        has_skylight,
+        has_ceiling,
+        ambient_light,
+        coordinate_scale,
+        ..
+    } = dim;
+    let cloud_height = value["attributes"]["minecraft:visual/cloud_height"]
+        .as_f64()
+        .expect("Missing cloud height") as f32;
+    Ok(quote! {
+        impl crate::dimension::Dimension {
+            pub const OVERWORLD_CLEANROOM_EXTREME: Self = Self {
+                min_y: #min_y, height: #height, logical_height: #logical_height,
+                has_skylight: #has_skylight, has_ceiling: #has_ceiling,
+                ambient_light: #ambient_light, coordinate_scale: #coordinate_scale,
+                cloud_height: Some(#cloud_height),
+                ..Self::OVERWORLD
+            };
+        }
+    })
+}
+
 /// Generates the `TokenStream` for the `Dimension` struct, its constants, and `from_name` lookup.
 pub fn build() -> TokenStream {
     let dir = std::path::Path::new("../../assets/datapack/data/minecraft/dimension_type");

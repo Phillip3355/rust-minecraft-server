@@ -996,8 +996,29 @@ impl JigsawGenerator {
             .structure_key
             .map(|key| pumpkin_data::structures::Structure::get(&key));
 
+        let cleanroom =
+            pumpkin_data::worldgen_profile::cleanroom_profile().is_some_and(|profile| {
+                context.min_y == profile.dimension.min_y
+                    && context.sea_level == profile.settings.sea_level
+            });
         let start_y = if let Some(s) = structure {
             s.start_height.map_or(context.sea_level, |hp| {
+                if cleanroom && let pumpkin_data::structures::HeightProvider::Uniform(provider) = hp
+                {
+                    let anchor = |anchor| match anchor {
+                        pumpkin_util::y_offset::YOffset::Absolute(value) => {
+                            pumpkin_util::y_offset::extreme_overworld_y(i32::from(value.absolute))
+                        }
+                        relative => relative.get_y(context.min_y as i16, context.height),
+                    };
+                    let min = anchor(provider.min_inclusive);
+                    let max = anchor(provider.max_inclusive);
+                    return if min >= max {
+                        min
+                    } else {
+                        context.random.next_inbetween_i32(min, max)
+                    };
+                }
                 hp.get(&mut context.random, context.min_y as i16, context.height)
             })
         } else {
@@ -1021,6 +1042,8 @@ impl JigsawGenerator {
         );
         if let Some(vertical) = structure.and_then(|s| s.max_vertical_distance) {
             max_distance.vertical = vertical;
+        } else if cleanroom {
+            max_distance.vertical = i32::from(context.height);
         }
 
         let liquid_settings =

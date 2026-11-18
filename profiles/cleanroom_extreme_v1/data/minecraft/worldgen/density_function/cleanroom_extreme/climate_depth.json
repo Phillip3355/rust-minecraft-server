@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:range_choice",
+  "input": "minecraft:y",
+  "min_inclusive": -4096,
+  "max_exclusive": -400,
+  "when_in_range": {
+    "type": "minecraft:y_clamped_gradient",
+    "from_y": -512,
+    "to_y": -400,
+    "from_value": 1.15,
+    "to_value": 0.0
+  },
+  "when_out_of_range": {
+    "type": "minecraft:max",
+    "left": 0.0,
+    "right": "minecraft:cleanroom_extreme/depth"
+  }
+}

@@ -255,6 +255,18 @@ pub fn carve(chunk: &mut ProtoChunk, generator: &VanillaGenerator) {
             });
 
             for (index, &config) in carvers.iter().enumerate() {
+                use pumpkin_data::carver::{CANYON, CAVE, CAVE_EXTRA_UNDERGROUND};
+                let config = if let Some(profile) = generator.cleanroom {
+                    [&CAVE, &CAVE_EXTRA_UNDERGROUND, &CANYON]
+                        .into_iter()
+                        .zip(profile.carvers)
+                        .find_map(|(vanilla, replacement)| {
+                            std::ptr::eq(config, vanilla).then_some(replacement)
+                        })
+                        .unwrap_or(config)
+                } else {
+                    config
+                };
                 let seed = get_large_feature_seed(
                     generator.random_config.seed + index as u64,
                     carver_x,
@@ -313,6 +325,8 @@ pub fn carve(chunk: &mut ProtoChunk, generator: &VanillaGenerator) {
                 &generator.base_router,
                 &generator.random_config,
                 generator.settings,
+                generator.lava_y,
+                generator.lava_transition_y,
                 existing_aquifer,
             )
         });
@@ -526,6 +540,8 @@ fn with_carve_run_options<F>(
             &generator.base_router,
             &generator.random_config,
             generator.settings,
+            generator.lava_y,
+            generator.lava_transition_y,
         )
     });
     let mut context = CarvingContext {

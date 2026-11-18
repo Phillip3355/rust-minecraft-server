@@ -1,0 +1,5 @@
+{
+  "type": "minecraft:add",
+  "left": "minecraft:cleanroom_extreme/y_gradient",
+  "right": "minecraft:cleanroom_extreme/offset"
+}

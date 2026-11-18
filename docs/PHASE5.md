@@ -1,6 +1,6 @@
 # Phase 5 — Extreme Worldgen
 
-**상태: 실험용 오프라인 통합.** Terralith·Incendium 스테이징 데이터를 밀도 라우터, 바이옴, 장식 피처, 카버 및 지그소 경로에 연결했다. Java와 Bedrock의 프로파일 전용 구조물 패킷 생성 경로를 추가했다. 실서버 검증은 **NOT TESTED**이며 시작 가드는 유지한다.
+**Phase 5b 상태: 실험용 오프라인 통합.** Terralith·Incendium 스테이징 데이터를 밀도 라우터, 바이옴, 장식 피처, 카버 및 지그소 경로에 연결했다. Java와 Bedrock의 프로파일 전용 구조물 패킷 생성 경로를 추가했다. 실서버 검증은 **NOT TESTED**이며 Terralith·Incendium 시작 가드는 유지한다.
 
 ## 확정 좌표
 
@@ -49,7 +49,7 @@ enabled = false
 profile = "terralith_incendium_extreme_v1"
 ```
 
-설정을 생략하면 비활성화된다. 현재 활성화 요청은 빌드 입력 유무에 따른 오류를 반환하고 월드 열기 전에 종료한다. 시험용 프리셋의 생성기 참조는 `data/minecraft/world_gen_settings.dat`에 저장한다. `level.dat`의 `PumpkinWorldgenProfile`은 프로파일 ID, 버전, 스테이징 입력 해시 및 차원 경계를 기록한다. 기본 월드의 저장에는 이 태그가 없다. 기록이 손상됐거나 선택과 불일치하면 열기 또는 덮어쓰기를 거부한다.
+설정을 생략하면 비활성화된다. 이 프로파일의 활성화 요청은 빌드 입력 유무에 따른 오류를 반환하고 월드 열기 전에 종료한다. 시험용 프리셋의 생성기 참조는 `data/minecraft/world_gen_settings.dat`에 저장한다. `level.dat`의 `PumpkinWorldgenProfile`은 프로파일 ID, 버전, 스테이징 입력 해시 및 차원 경계를 기록한다. 기본 월드의 저장에는 이 태그가 없다. 기록이 손상됐거나 선택과 불일치하면 열기 또는 덮어쓰기를 거부한다.
 
 ## 남은 범위
 
@@ -85,3 +85,66 @@ cargo test --offline -j 2 -- \
 PUMPKIN_COMPILED_WORLDGEN_PROFILE=/absolute/path/to/compiled \
   cargo test --offline -j 2 -p pumpkin-world -p pumpkin-core -- profile
 ```
+
+
+## Phase 5c — Clean-room Extreme
+
+`cleanroom_extreme_v1`은 바닐라 26.3과 [Clean-room 오버레이](../profiles/cleanroom_extreme_v1/data/minecraft)로 빌드한다. 오버월드 Y는 `-512..511`(64섹션), 해수면은 `-400`, 구름은 `432`다. 바닐라 바이옴 ID와 기후 트리, 피처 및 구조물 등록을 유지한다. Nether와 End는 바닐라 생성을 사용한다.
+
+| 단계 | 구현 및 오프라인 확인 |
+|---|---|
+| 1. 데이터 자산 | 지형 깊이와 기후 깊이를 분리했다. 다변수 스플라인, 상·하단 슬라이드, 축소형 Underlands, 누들·스파게티 동굴, 기반암·딥슬레이트·설선 규칙을 추가했다. 밀도 함수의 `depth=0` 교차점은 평원 `-400`, 산맥 `+400`, 심해 `-465`였다. |
+| 2. 스테이징 및 코드젠 | `--profile cleanroom_extreme_v1`은 바닐라와 Clean-room 레이어만 읽는다. 컴파일은 스테이징 파일 목록과 SHA-256을 대조한다. 동일 입력의 `cleanroom.rs` 재생성 결과를 바이트 단위로 비교했다. |
+| 3. 생성기 Y 바인딩 | 대수층 용암 경계 `-502`, 용암 노이즈 전이 상한 `-458`, 철 광맥 `-508..-452`, 구리 광맥 `-448..-390`을 적용한다. 광물 높이 앵커, 협곡 `-450..-390`, 추가 지하 카버 `-504..-410`, 구조물 높이 및 난파선·악지 기둥 기준을 조정했다. 스트롱홀드 조회와 월드 로드는 선택된 생성기의 설정을 사용한다. |
+| 4. 프로파일 저장 및 가드 | `level.dat`과 `data/minecraft/world_gen_settings.dat`에 `pumpkin:cleanroom_extreme`을 기록한다. `pumpkin_worldgen_profile.json`에 ID·버전·차원 경계·해수면·정의 해시를 기록하고 시작 전에 대조한다. 바닐라 월드에 이 프리셋을 켜거나, Clean-room 월드의 설정을 끄거나, 메타데이터가 불일치하면 청크 I/O 전에 거부한다. 청크가 없는 첫 초기화 중단은 일치하는 메타데이터로 재개할 수 있다. Java 차원 레지스트리는 데이터팩 재로드 뒤에도 네트워크 ID와 프로파일의 경계·구름 높이를 유지한다. |
+| 5. 청크 검증 | 시드 0에서 평원·산맥·심해 후보를 각각 3개 골라 생성했다. 노이즈·표면·카버·피처 단계 이후 Anvil로 저장하고, 새 지역 파일 핸들로 다시 읽어 블록·바이옴·하이트맵을 비교했다. |
+
+`[experimental.worldgen]`의 기본값은 `enabled = false`, 기본 프로파일 이름은 `cleanroom_extreme_v1`이다. 이 프로파일을 활성화하려면 컴파일된 프로파일을 포함한 빌드와 일치하는 새 월드 또는 기존 Clean-room 월드가 필요하다.
+
+### 시드 0의 Anvil 샘플 결과
+
+| 확인 항목 | 오프라인 결과 |
+|---|---|
+| 차원 경계 | 9개 청크 모두 64섹션, Y `-512..511` |
+| 평원 | 표면 중앙값 `-406`, `-401`, `-398` |
+| 산맥 | 청크별 최고 지형 Y `393`, `397`, `400` |
+| 해저 | 후보 3곳의 해저 중앙값 `-466`, `-462`, `-439` |
+| 동굴 | 목표 구간 `-507..-420`에 지형 아래 빈 블록 13,948개. 높은 산 내부의 터널도 관찰됐다. |
+| 용암 | `-474..-467`에서 372블록 관측. 대수층 경계 설정값 `-502`도 테스트에서 확인했다. |
+| 딥슬레이트 | `-511..-445`에서 111,216블록 관측 |
+| 광물 | 지하 목표 구간 `-508..-390`에 1,809블록. 전체 표본은 `-511..382`에 분포했다. |
+| 청크 재로드 | 블록·바이옴·하이트맵 일치. `world-verify cleanroom` 오류 0건. |
+
+최종 회귀 검증에서 `world-verify` 50개, `datapack-audit` 20개, `pumpkin-world` 유닛 304개와 통합 2개, `pumpkin-codegen` 9개가 통과했다. Clean-room을 포함한 빌드에서 청크 표본 및 레지스트리 재로드 테스트도 각각 통과했다.
+
+청크 표본은 단일 시드에서 기후와 높이 추정값을 기준으로 골랐다. 고산의 실제 블록 최고점 범위를 맞추기 위해 Y 300–400에 3D 밀도 보정을 적용했다. 여러 시드에 걸친 출현 빈도와 바닐라 구조물별 실제 배치 분포는 별도 실측이 필요하다.
+
+### 오프라인 재현
+
+바닐라 26.3 추출 데이터가 로컬 `reference/pumpkin-src/assets/datapack`에 있는 상태에서 저장소 루트에서 실행한다. 각 출력 디렉터리는 미리 존재하지 않아야 한다.
+
+```sh
+mkdir -p .work/phase5c
+python3 tools/world-verify/scripts/cleanroom_density.py
+
+cargo run --offline --locked -j 4 --manifest-path reference/pumpkin-src/Cargo.toml \
+  -p pumpkin-codegen -- stage-worldgen-profile --profile cleanroom_extreme_v1 .work/phase5c/staged
+cargo run --offline --locked -j 4 --manifest-path reference/pumpkin-src/Cargo.toml \
+  -p pumpkin-codegen -- compile-worldgen-profile --profile cleanroom_extreme_v1 \
+  .work/phase5c/staged .work/phase5c/compiled
+
+PUMPKIN_COMPILED_WORLDGEN_PROFILE="$PWD/.work/phase5c/compiled" \
+  cargo test --offline --locked -j 4 --manifest-path reference/pumpkin-src/Cargo.toml \
+  -p pumpkin-core cleanroom_dimension_registry_survives_datapack_reload
+
+PUMPKIN_COMPILED_WORLDGEN_PROFILE="$PWD/.work/phase5c/compiled" \
+PUMPKIN_CLEANROOM_SAMPLE_OUTPUT="$PWD/.work/phase5c/snapshots" \
+  cargo test --offline --locked -j 4 --manifest-path reference/pumpkin-src/Cargo.toml \
+  -p pumpkin-world cleanroom_offline_samples -- --ignored --nocapture
+
+cargo run --offline --locked --manifest-path tools/world-verify/Cargo.toml -- cleanroom \
+  .work/phase5c/snapshots/before .work/phase5c/snapshots/after \
+  --json .work/phase5c/world-verify-cleanroom.json
+```
+
+**NOT TESTED** · 실서버 기동 및 재시작, Java/Bedrock 접속 및 플레이, 렌더링·조명, 블록 설치·파괴.

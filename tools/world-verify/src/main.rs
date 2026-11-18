@@ -11,6 +11,7 @@ world-verify — Phase 1 Anvil world integrity verifier (offline, no dependencie
 USAGE:
   world-verify verify   <world>                 [--expect-data-version N] [--json FILE]
   world-verify diff     <before> <after>        [--strict] [--json FILE]
+  world-verify cleanroom <generated-world> <reloaded-world> [--json FILE]
   world-verify items    <world>                 [--json FILE]
   world-verify conserve <before> <after>        [--allow ITEM_ID]... [--strict-loss] [--json FILE]
   world-verify fixture  <dir>                   [--compression 1|2|3|4]
@@ -21,6 +22,7 @@ verify    structural check: region headers/sectors, compression checksums, NBT,
 diff      snapshot comparison: lost chunks, lost players; with --strict (no
           gameplay between snapshots) also changed blocks/block entities and
           changed inventories/positions.
+cleanroom checks expanded sections, terrain and underground samples, and a strict reload diff.
 items     item totals across players, containers, item entities.
 conserve  item conservation: any increase = duplication (error); decrease =
           possible loss (warning, or error with --strict-loss).
@@ -120,13 +122,16 @@ fn main() -> ExitCode {
             }
             report.merge(w.report);
         }
-        "diff" | "conserve" => {
+        "diff" | "conserve" | "cleanroom" => {
             if !need(2) {
                 return ExitCode::from(2);
             }
             let mut a = world::load(PathBuf::from(&args.pos[0]).as_path());
             let mut b = world::load(PathBuf::from(&args.pos[1]).as_path());
-            if cmd == "diff" {
+            if cmd == "cleanroom" {
+                world_verify::cleanroom::verify(&a, &mut report);
+                world::diff(&a, &b, true, &mut report);
+            } else if cmd == "diff" {
                 world::diff(&a, &b, args.strict, &mut report);
             } else {
                 let ta = a.item_totals();

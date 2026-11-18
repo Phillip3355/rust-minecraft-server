@@ -5,7 +5,9 @@ impl PendingConnection {
     pub async fn handle_known_packs(&mut self, server: &Server) {
         let version = CURRENT_MC_VERSION;
         let mut synced = server.datapack_manager.get_all_synced_registries();
-        if let Some(profile) = server.level_info.load().worldgen_profile.as_ref() {
+        if let Some(profile) = server.level_info.load().worldgen_profile.as_ref()
+            && profile.id == pumpkin_world::world_info::worldgen_profile::EXTREME_PROFILE_ID
+        {
             apply_worldgen_profile(&mut synced, profile);
         }
         for reg in &synced {

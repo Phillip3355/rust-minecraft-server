@@ -45,6 +45,8 @@ pub struct GlobalStructureCache {
     /// The ring search that fills `stronghold_chunks`, started once by
     /// [`Self::ensure_strongholds_generated`]; readers then wait for it.
     stronghold_job: Option<StrongholdJob>,
+    stronghold_router: &'static pumpkin_data::noise_router::BaseNoiseRouters,
+    legacy_random_source: bool,
     stronghold_job_started: Once,
     stronghold_bounds: OnceLock<StrongholdRingBounds>,
     /// Memoized structure starts, keyed by (structure, start chunk x, start chunk z).
@@ -84,6 +86,10 @@ impl GlobalStructureCache {
         Self {
             stronghold_chunks: Arc::new(OnceLock::new()),
             stronghold_job: None,
+            stronghold_router: pumpkin_data::noise_router::BaseNoiseRouters::from_dimension(
+                &pumpkin_data::dimension::Dimension::OVERWORLD,
+            ),
+            legacy_random_source: false,
             stronghold_job_started: Once::new(),
             stronghold_bounds: OnceLock::new(),
             structure_starts: OnceLock::new(),
@@ -97,6 +103,8 @@ impl GlobalStructureCache {
         seed: i64,
         placement: &'static ConcentricRingsStructurePlacement,
         multi_noise: &Arc<ProtoMultiNoiseRouter>,
+        stronghold_router: &'static pumpkin_data::noise_router::BaseNoiseRouters,
+        legacy_random_source: bool,
     ) -> Self {
         Self {
             stronghold_job: Some(StrongholdJob {
@@ -104,8 +112,19 @@ impl GlobalStructureCache {
                 placement,
                 multi_noise: multi_noise.clone(),
             }),
+            stronghold_router,
+            legacy_random_source,
             ..Self::new()
         }
+    }
+
+    fn fallback_stronghold_router(&self, seed: i64) -> Arc<ProtoMultiNoiseRouter> {
+        let random = crate::GlobalRandomConfig::new(seed as u64, self.legacy_random_source);
+        crate::generation::noise::router::proto_noise_router::ProtoNoiseRouters::generate(
+            self.stronghold_router,
+            &random,
+        )
+        .multi_noise
     }
 
     /// Starts the stronghold ring search if it has not started yet
@@ -376,17 +395,9 @@ impl GlobalStructureCache {
         *bounds.resolved[index].get_or_init(|| {
             let multi_noise = self.stronghold_job.as_ref().map_or_else(
                 || {
-                    bounds.fallback_router.get_or_init(|| {
-                        let random_config = crate::GlobalRandomConfig::new(seed as u64, false);
-                        let base = pumpkin_data::noise_router::BaseNoiseRouters::from_dimension(
-                            &pumpkin_data::dimension::Dimension::OVERWORLD,
-                        );
-                        crate::generation::noise::router::proto_noise_router::ProtoNoiseRouters::generate(
-                            base,
-                            &random_config,
-                        )
-                        .multi_noise
-                    })
+                    bounds
+                        .fallback_router
+                        .get_or_init(|| self.fallback_stronghold_router(seed))
                 },
                 |job| &job.multi_noise,
             );
@@ -523,17 +534,18 @@ impl GlobalStructureCache {
             return self.get_stronghold_chunks();
         }
         // A panic here leaves the cell empty, so the next caller retries instead of waiting.
-        self.stronghold_chunks.get_or_init(|| {
-            Some(multi_noise.map_or_else(
-                || {
-                    let random_config = crate::GlobalRandomConfig::new(seed as u64, false);
-                    let base = pumpkin_data::noise_router::BaseNoiseRouters::from_dimension(&pumpkin_data::dimension::Dimension::OVERWORLD);
-                    let base_router = crate::generation::noise::router::proto_noise_router::ProtoNoiseRouters::generate(base, &random_config);
-                    Self::calculate_strongholds(seed, placement, &base_router.multi_noise)
-                },
-                |multi_noise| Self::calculate_strongholds(seed, placement, multi_noise),
-            ))
-        }).as_deref().unwrap_or_default()
+        self.stronghold_chunks
+            .get_or_init(|| {
+                Some(multi_noise.map_or_else(
+                    || {
+                        let router = self.fallback_stronghold_router(seed);
+                        Self::calculate_strongholds(seed, placement, &router)
+                    },
+                    |multi_noise| Self::calculate_strongholds(seed, placement, multi_noise),
+                ))
+            })
+            .as_deref()
+            .unwrap_or_default()
     }
 }
 

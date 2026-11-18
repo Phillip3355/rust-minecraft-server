@@ -1,0 +1,58 @@
+{
+  "type": "minecraft:lerp",
+  "alpha": {
+    "type": "minecraft:mul",
+    "left": {
+      "type": "minecraft:y_clamped_gradient",
+      "from_y": -505,
+      "to_y": -495,
+      "from_value": 0.0,
+      "to_value": 1.0
+    },
+    "right": {
+      "type": "minecraft:y_clamped_gradient",
+      "from_y": -430,
+      "to_y": -415,
+      "from_value": 1.0,
+      "to_value": 0.0
+    }
+  },
+  "first": 1.0,
+  "second": {
+    "type": "minecraft:max",
+    "left": {
+      "type": "minecraft:add",
+      "left": {
+        "type": "minecraft:mul",
+        "left": 0.85,
+        "right": {
+          "type": "minecraft:square",
+          "input": {
+            "type": "minecraft:noise",
+            "noise": "minecraft:cave_layer",
+            "xz_scale": 1.0,
+            "y_scale": 2.0
+          }
+        }
+      },
+      "right": {
+        "type": "minecraft:add",
+        "left": 0.16,
+        "right": {
+          "type": "minecraft:noise",
+          "noise": "minecraft:cave_cheese",
+          "xz_scale": 1.0,
+          "y_scale": 0.6666666666666666
+        }
+      }
+    },
+    "right": {
+      "type": "minecraft:range_choice",
+      "input": "minecraft:overworld/caves/pillars",
+      "min_inclusive": -1000000.0,
+      "max_exclusive": 0.03,
+      "when_in_range": -1.0,
+      "when_out_of_range": "minecraft:overworld/caves/pillars"
+    }
+  }
+}

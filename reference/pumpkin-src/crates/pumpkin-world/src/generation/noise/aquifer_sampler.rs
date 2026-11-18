@@ -75,6 +75,8 @@ impl<'a> CarverAquiferSampler<'a> {
         base_router: &'a ProtoNoiseRouters,
         random_config: &GlobalRandomConfig,
         settings: &NoiseSettings,
+        lava_y: i32,
+        lava_transition_y: i32,
     ) -> Self {
         let shape = &settings.shape;
         let surface_config =
@@ -88,8 +90,9 @@ impl<'a> CarverAquiferSampler<'a> {
                 settings.sea_level,
                 Block::from_state_id(settings.default_fluid.id),
             ),
-            FluidLevel::new(-54, &Block::LAVA),
-        );
+            FluidLevel::new(lava_y, &Block::LAVA),
+        )
+        .with_lava_transition(lava_transition_y);
 
         Self {
             aquifer: WorldAquiferSampler::new(
@@ -116,6 +119,8 @@ impl<'a> CarverAquiferSampler<'a> {
         base_router: &'a ProtoNoiseRouters,
         random_config: &GlobalRandomConfig,
         settings: &NoiseSettings,
+        lava_y: i32,
+        lava_transition_y: i32,
         existing_aquifer: Option<Box<WorldAquiferSampler>>,
     ) -> Self {
         let shape = &settings.shape;
@@ -126,8 +131,9 @@ impl<'a> CarverAquiferSampler<'a> {
                         settings.sea_level,
                         Block::from_state_id(settings.default_fluid.id),
                     ),
-                    FluidLevel::new(-54, &Block::LAVA),
-                );
+                    FluidLevel::new(lava_y, &Block::LAVA),
+                )
+                .with_lava_transition(lava_transition_y);
                 WorldAquiferSampler::new(
                     chunk_x,
                     chunk_z,
@@ -534,7 +540,15 @@ impl WorldAquiferSampler {
         );
         FluidLevel::new(
             p,
-            Self::get_fluid_block_state(block_x, block_y, block_z, fluid_level, p, router),
+            Self::get_fluid_block_state(
+                block_x,
+                block_y,
+                block_z,
+                fluid_level,
+                p,
+                fluid_level_sampler.lava_transition_y,
+                router,
+            ),
         )
     }
 
@@ -609,9 +623,13 @@ impl WorldAquiferSampler {
         block_z: i32,
         default_level: &FluidLevel,
         level: i32,
+        lava_transition_y: i32,
         router: &mut ChunkNoiseRouter,
     ) -> &'static Block {
-        if level <= -10 && level != MIN_HEIGHT_CELL && default_level.block != &LAVA_BLOCK {
+        if level <= lava_transition_y
+            && level != MIN_HEIGHT_CELL
+            && default_level.block != &LAVA_BLOCK
+        {
             let x = floor_div(block_x, 64);
             let y = floor_div(block_y, 40);
             let z = floor_div(block_z, 64);
@@ -976,7 +994,7 @@ mod random_positions_and_hypot {
 
     fn create_carver_aquifer() -> CarverAquiferSampler<'static> {
         let settings = NoiseSettings::from_dimension(&Dimension::OVERWORLD);
-        CarverAquiferSampler::new(7, 4, &PROTO_ROUTER, &RANDOM_CONFIG, settings)
+        CarverAquiferSampler::new(7, 4, &PROTO_ROUTER, &RANDOM_CONFIG, settings, -54, -10)
     }
 
     #[test]
@@ -1161,7 +1179,7 @@ mod random_positions_and_hypot {
 
         for ((x, y, z), result) in values {
             assert_eq!(
-                WorldAquiferSampler::get_fluid_block_state(x, y, z, &level, -10, &mut router),
+                WorldAquiferSampler::get_fluid_block_state(x, y, z, &level, -10, -10, &mut router),
                 &result
             );
         }

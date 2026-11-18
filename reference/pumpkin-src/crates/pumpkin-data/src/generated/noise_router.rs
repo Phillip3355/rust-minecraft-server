@@ -33780,6 +33780,10 @@ impl BaseNoiseRouters {
     pub fn from_name(name: &str) -> Option<&'static Self> {
         let name = name.strip_prefix("minecraft:").unwrap_or(name);
         match name {
+            crate::worldgen_profile::CLEANROOM_SETTINGS
+            | crate::worldgen_profile::CLEANROOM_SETTINGS_REFERENCE => {
+                crate::worldgen_profile::cleanroom_profile().map(|profile| profile.router)
+            }
             "overworld" => Some(&OVERWORLD_BASE_NOISE_ROUTER),
             "amplified" => Some(&AMPLIFIED_BASE_NOISE_ROUTER),
             "large_biomes" => Some(&LARGE_BIOMES_BASE_NOISE_ROUTER),

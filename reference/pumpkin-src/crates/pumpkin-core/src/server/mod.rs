@@ -179,8 +179,15 @@ impl Server {
         plugin_loaders: Vec<Arc<dyn PluginLoader>>,
     ) -> Result<Arc<Self>, WorldInfoError> {
         let worldgen = &advanced_config.experimental.worldgen;
-        if worldgen.enabled {
-            if worldgen.profile == pumpkin_world::world_info::worldgen_profile::EXTREME_PROFILE_ID
+        use pumpkin_world::world_info::worldgen_profile::{
+            CLEANROOM_PROFILE_ID, EXTREME_PROFILE_ID, WorldgenProfile,
+        };
+        let selected_profile = if !worldgen.enabled {
+            None
+        } else if worldgen.profile == CLEANROOM_PROFILE_ID {
+            Some(WorldgenProfile::cleanroom()?)
+        } else {
+            if worldgen.profile == EXTREME_PROFILE_ID
                 && pumpkin_data::worldgen_profile::terrain_profile().is_some()
             {
                 return Err(WorldInfoError::IncompleteWorldgenProfile(
@@ -190,7 +197,10 @@ impl Server {
             return Err(WorldInfoError::UnavailableWorldgenProfile(
                 worldgen.profile.clone(),
             ));
-        }
+        };
+        let cleanroom = selected_profile
+            .as_ref()
+            .and_then(|_| pumpkin_data::worldgen_profile::cleanroom_profile());
 
         let permission_manager = Arc::new(PermissionManager::new());
         // First register the default commands. After that, plugins can put in their own.
@@ -209,7 +219,11 @@ impl Server {
 
         let level_info = match AnvilLevelInfo.read_world_info(&world_path) {
             Ok(level_info) => {
-                level_info.worldgen_profile_matches(None)?;
+                WorldgenProfile::validate_world(
+                    &world_path,
+                    Some(&level_info),
+                    selected_profile.as_ref(),
+                )?;
                 let dat_path = world_path.join(LEVEL_DAT_FILE_NAME);
                 if dat_path.exists() {
                     let backup_path = world_path.join(LEVEL_DAT_BACKUP_FILE_NAME);
@@ -219,7 +233,12 @@ impl Server {
                 }
                 level_info
             }
+            Err(WorldInfoError::InfoNotFound) if selected_profile.is_some() => selected_profile
+                .as_ref()
+                .unwrap()
+                .initialize_cleanroom(&world_path, basic_config.seed)?,
             Err(WorldInfoError::InfoNotFound) => {
+                WorldgenProfile::validate_world(&world_path, None, None)?;
                 warn!(
                     "No {LEVEL_DAT_FILE_NAME} in {}, creating a new world with seed {}",
                     world_path.display(),
@@ -280,7 +299,8 @@ impl Server {
         let tick_rate_manager = Arc::new(ServerTickRateManager::new(basic_config.tps));
 
         let dimensions = {
-            let mut dimensions = vec![Dimension::OVERWORLD];
+            let mut dimensions =
+                vec![cleanroom.map_or(Dimension::OVERWORLD, |profile| profile.dimension.clone())];
             if basic_config.allow_nether {
                 dimensions.push(Dimension::THE_NETHER);
             }
@@ -332,7 +352,9 @@ impl Server {
             permission_manager,
             container_id: 0.into(),
             recipe_manager: Arc::new(recipe::RecipeManager::new()),
-            datapack_manager: Arc::new(crate::data::datapack::DatapackManager::new()),
+            datapack_manager: Arc::new(crate::data::datapack::DatapackManager::with_cleanroom(
+                cleanroom,
+            )),
             enchantment_manager: Arc::new(enchantment::EnchantmentManager::new()),
             map_id: level_info.load().map_id.into(),
             worlds: ArcSwap::from_pointee(vec![]),

@@ -280,7 +280,7 @@ fn first_block_diff(a: &Tag, b: &Tag) -> Option<String> {
                     let (x, z, yy) = (i % 16, (i / 16) % 16, i / 256);
                     let ba = &pa[ia[i] as usize];
                     let bb = &pb[ib[i] as usize];
-                    if ba != bb {
+                    if ba != bb && !ba.eq_ignoring(bb, &[]) {
                         let name = |t: &Tag| t.get("Name").and_then(Tag::as_str).unwrap_or("?").to_string();
                         return Some(format!(
                             "section Y={y} local ({x},{yy},{z}): {} -> {}",

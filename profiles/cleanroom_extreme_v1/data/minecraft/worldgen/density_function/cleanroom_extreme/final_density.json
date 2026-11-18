@@ -1,0 +1,69 @@
+{
+  "type": "minecraft:add",
+  "left": {
+    "type": "minecraft:min",
+    "left": {
+      "type": "minecraft:squeeze",
+      "input": {
+        "type": "minecraft:interpolated",
+        "cell_size_xz": 4,
+        "cell_size_y": 8,
+        "input": {
+          "type": "minecraft:mul",
+          "left": 0.64,
+          "right": {
+            "type": "minecraft:blend_density",
+            "input": {
+              "type": "minecraft:lerp",
+              "alpha": "minecraft:cleanroom_extreme/bottom_slide",
+              "first": 1.0,
+              "second": {
+                "type": "minecraft:lerp",
+                "alpha": "minecraft:cleanroom_extreme/top_slide",
+                "first": {
+                  "type": "minecraft:min",
+                  "left": "minecraft:cleanroom_extreme/sloped_cheese",
+                  "right": {
+                    "type": "minecraft:min",
+                    "left": {
+                      "type": "minecraft:range_choice",
+                      "input": "minecraft:y",
+                      "min_inclusive": -507,
+                      "max_exclusive": 120,
+                      "when_in_range": {
+                        "type": "minecraft:min",
+                        "left": {
+                          "type": "minecraft:add",
+                          "left": "minecraft:cleanroom_extreme/entrances",
+                          "right": {
+                            "type": "minecraft:y_clamped_gradient",
+                            "from_y": -350,
+                            "to_y": 120,
+                            "from_value": 0.0,
+                            "to_value": 0.28
+                          }
+                        },
+                        "right": {
+                          "type": "minecraft:add",
+                          "left": "minecraft:cleanroom_extreme/spaghetti_2d",
+                          "right": "minecraft:overworld/caves/spaghetti_roughness_function"
+                        }
+                      },
+                      "when_out_of_range": 64.0
+                    },
+                    "right": "minecraft:cleanroom_extreme/compressed_underlands_cheese"
+                  }
+                },
+                "second": -1.0
+              }
+            }
+          }
+        }
+      }
+    },
+    "right": "minecraft:cleanroom_extreme/noodle"
+  },
+  "right": {
+    "type": "minecraft:beardifier"
+  }
+}

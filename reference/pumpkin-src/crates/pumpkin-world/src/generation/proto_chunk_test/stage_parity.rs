@@ -326,10 +326,10 @@ pub(crate) struct TestGridCache {
 
 impl crate::generation::height_limit::HeightLimitView for TestGridCache {
     fn height(&self) -> u16 {
-        384
+        self.chunks[&self.center_pos].height()
     }
     fn bottom_y(&self) -> i16 {
-        -64
+        self.chunks[&self.center_pos].bottom_y()
     }
 }
 
@@ -843,4 +843,219 @@ fn profile_staged_packs_reach_generation_and_persistence() {
         restored.worldgen_profile_matches(None),
         Err(WorldInfoError::WorldgenProfileMismatch)
     ));
+}
+
+/// Tracked offline fixture generator. The environment variable selects a new output directory.
+#[test]
+#[ignore = "requires the compiled Clean-room profile and an explicit snapshot output path"]
+fn cleanroom_offline_samples() {
+    use crate::{
+        chunk::{
+            ChunkData, ChunkHeightmapType,
+            format::anvil::AnvilRegion,
+            io::{RegionFile, region_chunk_index, region_of},
+        },
+        chunk_system::Chunk,
+        generation::noise::router::{
+            multi_noise_sampler::MultiNoiseSampler,
+            surface_height_sampler::{
+                SurfaceHeightEstimateSampler, SurfaceHeightSamplerBuilderOptions,
+            },
+        },
+        world_info::{
+            WorldInfoReader, WorldInfoWriter,
+            anvil::AnvilLevelInfo,
+            worldgen_profile::{CLEANROOM_METADATA_FILE, WorldgenProfile},
+        },
+    };
+    use pumpkin_config::{chunk::AnvilChunkConfig, lighting::LightingEngineConfig};
+    use pumpkin_util::math::vector2::Vector2;
+    use std::{collections::HashMap, fs, path::Path};
+
+    fn region(root: &Path, pos: Vector2<i32>) -> AnvilRegion {
+        let dir = root.join("dimensions/minecraft/overworld/region");
+        fs::create_dir_all(&dir).unwrap();
+        let region = region_of(pos);
+        AnvilRegion::open(&dir.join(AnvilRegion::file_name(region)), region).unwrap()
+    }
+
+    fn save(root: &Path, pos: Vector2<i32>, chunk: &ChunkData) {
+        let mut region = region(root, pos);
+        let payload = AnvilRegion::serialize_chunk(chunk).unwrap();
+        let encoded = AnvilRegion::encode_chunk(payload, &AnvilChunkConfig::default()).unwrap();
+        region.stage_chunk(region_chunk_index(pos), encoded);
+        region.flush(true).unwrap();
+    }
+
+    fn read(root: &Path, pos: Vector2<i32>) -> ChunkData {
+        let raw = region(root, pos)
+            .read_chunk(region_chunk_index(pos))
+            .unwrap()
+            .unwrap();
+        ChunkData::internal_from_bytes(&AnvilRegion::decode_chunk(raw).unwrap(), pos).unwrap()
+    }
+
+    let root = std::env::var_os("PUMPKIN_CLEANROOM_SAMPLE_OUTPUT")
+        .expect("Choose a new snapshot directory with PUMPKIN_CLEANROOM_SAMPLE_OUTPUT");
+    let root = std::path::PathBuf::from(root);
+    fs::create_dir(&root).unwrap();
+    let original = root.join("before");
+    let reloaded = root.join("after");
+
+    let id = WorldgenProfile::cleanroom().unwrap();
+    let seed = Seed(0);
+    id.initialize_cleanroom(&original, seed).unwrap();
+    let first_level = AnvilLevelInfo.read_world_info(&original).unwrap();
+    WorldgenProfile::validate_world(&original, Some(&first_level), Some(&id)).unwrap();
+    assert!(WorldgenProfile::validate_world(&original, Some(&first_level), None).is_err());
+    let vanilla = root.join("vanilla");
+    let vanilla_data = crate::world_info::LevelData::default(seed);
+    AnvilLevelInfo
+        .write_world_info(&vanilla_data, &vanilla)
+        .unwrap();
+    assert!(WorldgenProfile::validate_world(&vanilla, Some(&vanilla_data), Some(&id)).is_err());
+
+    let interrupted = root.join("interrupted");
+    fs::create_dir(&interrupted).unwrap();
+    fs::copy(
+        original.join(CLEANROOM_METADATA_FILE),
+        interrupted.join(CLEANROOM_METADATA_FILE),
+    )
+    .unwrap();
+    id.initialize_cleanroom(&interrupted, seed).unwrap();
+    let interrupted_data = AnvilLevelInfo.read_world_info(&interrupted).unwrap();
+    WorldgenProfile::validate_world(&interrupted, Some(&interrupted_data), Some(&id)).unwrap();
+    fs::write(interrupted.join(CLEANROOM_METADATA_FILE), b"{}").unwrap();
+    assert!(
+        WorldgenProfile::validate_world(&interrupted, Some(&interrupted_data), Some(&id)).is_err()
+    );
+
+    let settings = &first_level.world_gen_settings.dimensions["minecraft:overworld"];
+    let Some(crate::world_info::GeneratorSettings::Reference(settings_name)) =
+        &settings.generator.settings
+    else {
+        panic!("Expected persisted Clean-room noise settings");
+    };
+    let compiled = pumpkin_data::worldgen_profile::cleanroom_profile().unwrap();
+    let world_gen = crate::generation::get_world_gen_with_all_settings(
+        Seed(first_level.world_gen_settings.seed as u64),
+        compiled.dimension.clone(),
+        false,
+        Vec::new(),
+        String::new(),
+        Some(settings_name),
+        settings.generator.biome_source.as_ref(),
+        None,
+    );
+    let WorldGenerator::Noise(generator) = world_gen.as_ref() else {
+        unreachable!()
+    };
+    assert_eq!(generator.settings.sea_level, -400);
+    assert_eq!(generator.lava_y, -502);
+    assert_eq!(generator.dimension.height, 1024);
+    assert!(std::ptr::eq(generator.settings, compiled.settings));
+    let mut climate = MultiNoiseSampler::generate(&generator.base_router.multi_noise);
+    let mut heights = SurfaceHeightEstimateSampler::generate(
+        &generator.base_router.surface_estimator,
+        &SurfaceHeightSamplerBuilderOptions::new(-512, 512, 8),
+    );
+
+    let mut sites = [Vec::new(), Vec::new(), Vec::new()];
+    'scan: for cx in (-360..=360).step_by(5) {
+        for cz in (-360..=360).step_by(5) {
+            let x = cx * 16 + 8;
+            let z = cz * 16 + 8;
+            let point = climate.sample(x >> 2, -100, z >> 2);
+            let estimated_y = heights.estimate_height(x, z);
+            let kind = if point.continentalness > -1100
+                && point.erosion > 2500
+                && (-425..=-380).contains(&estimated_y)
+            {
+                0
+            } else if point.continentalness >= 3500
+                && point.erosion < -4500
+                && (310..=396).contains(&estimated_y)
+            {
+                1
+            } else if point.continentalness < -4200 && (-475..=-451).contains(&estimated_y) {
+                2
+            } else {
+                continue;
+            };
+            if sites[kind].len() < 3
+                && sites[kind]
+                    .iter()
+                    .all(|&(a, b): &(i32, i32)| (a - cx).abs().max((b - cz).abs()) >= 20)
+            {
+                sites[kind].push((cx, cz));
+                println!("sample class={kind} chunk=({cx},{cz}) estimate={estimated_y}");
+            }
+            if sites.iter().all(|positions| positions.len() == 3) {
+                break 'scan;
+            }
+        }
+    }
+    assert!(
+        sites.iter().all(|positions| positions.len() == 3),
+        "{sites:?}"
+    );
+
+    for (cx, cz) in sites.into_iter().flatten() {
+        let mut chunks = HashMap::new();
+        for x in cx - 1..=cx + 1 {
+            for z in cz - 1..=cz + 1 {
+                let mut chunk = ProtoChunk::new(x, z, &world_gen);
+                chunk.step_to_biomes(generator);
+                chunk.set_structure_starts(generator);
+                chunk.set_structure_references(generator);
+                chunk.step_to_noise(generator);
+                chunk.step_to_surface(generator, &surface_biomes(&world_gen, x, z));
+                chunk.step_to_carvers(generator);
+                chunks.insert((x, z), chunk);
+            }
+        }
+        let mut cache = TestGridCache {
+            center_pos: (cx, cz),
+            chunks,
+        };
+        ProtoChunk::generate_features_and_structure(&mut cache, &TestBlockRegistry, generator);
+        let mut chunk = Chunk::Proto(Box::new(cache.chunks.remove(&(cx, cz)).unwrap()));
+        chunk.upgrade_to_level_chunk(world_gen.dimension(), &LightingEngineConfig::Default);
+        let Chunk::Level(chunk) = chunk else {
+            unreachable!()
+        };
+        let pos = Vector2::new(cx, cz);
+        save(&original, pos, &chunk);
+        let restored = read(&original, pos);
+        assert_eq!(chunk.section.min_y, restored.section.min_y);
+        assert_eq!(chunk.section.count, restored.section.count);
+        assert_eq!(chunk.section.dump_blocks(), restored.section.dump_blocks());
+        assert_eq!(chunk.section.dump_biomes(), restored.section.dump_biomes());
+        let before = chunk.heightmap.lock().unwrap();
+        let after = restored.heightmap.lock().unwrap();
+        for x in 0..16 {
+            for z in 0..16 {
+                for kind in [
+                    ChunkHeightmapType::WorldSurface,
+                    ChunkHeightmapType::MotionBlocking,
+                    ChunkHeightmapType::MotionBlockingNoLeaves,
+                ] {
+                    assert_eq!(before.get(kind, x, z, -512), after.get(kind, x, z, -512));
+                }
+            }
+        }
+        drop(before);
+        drop(after);
+        save(&reloaded, pos, &restored);
+    }
+    fs::copy(
+        original.join(CLEANROOM_METADATA_FILE),
+        reloaded.join(CLEANROOM_METADATA_FILE),
+    )
+    .unwrap();
+    AnvilLevelInfo
+        .write_world_info(&first_level, &reloaded)
+        .unwrap();
+    let reopened = AnvilLevelInfo.read_world_info(&reloaded).unwrap();
+    WorldgenProfile::validate_world(&reloaded, Some(&reopened), Some(&id)).unwrap();
 }

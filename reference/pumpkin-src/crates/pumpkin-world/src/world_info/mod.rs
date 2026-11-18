@@ -617,7 +617,9 @@ pub enum WorldInfoError {
     UnavailableWorldgenProfile(String),
     #[error("Experimental worldgen profile {0} is incomplete and cannot open a world")]
     IncompleteWorldgenProfile(String),
-    #[error("World generation profile differs from the profile recorded in level.dat")]
+    #[error(
+        "World generation profile conflicts with the existing world or its saved profile metadata"
+    )]
     WorldgenProfileMismatch,
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),

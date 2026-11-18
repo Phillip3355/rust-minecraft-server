@@ -1,0 +1,39 @@
+{
+  "type": "minecraft:interpolated",
+  "cell_size_xz": 16,
+  "cell_size_y": 1,
+  "input": {
+    "type": "minecraft:find_top_surface",
+    "cell_height": 8,
+    "lower_bound": -512,
+    "density": {
+      "type": "minecraft:lerp",
+      "alpha": "minecraft:cleanroom_extreme/bottom_slide",
+      "first": 1.0,
+      "second": {
+        "type": "minecraft:lerp",
+        "alpha": "minecraft:cleanroom_extreme/top_slide",
+        "first": {
+          "type": "minecraft:add",
+          "left": "minecraft:cleanroom_extreme/depth",
+          "right": -0.012
+        },
+        "second": -1.0
+      }
+    },
+    "upper_bound": {
+      "type": "minecraft:clamp",
+      "input": {
+        "type": "minecraft:add",
+        "left": {
+          "type": "minecraft:mul",
+          "left": 341.3333333333333,
+          "right": "minecraft:cleanroom_extreme/offset"
+        },
+        "right": 64.0
+      },
+      "min": -504.0,
+      "max": 511.0
+    }
+  }
+}

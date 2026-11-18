@@ -143,6 +143,9 @@ pub struct VanillaGenerator {
     pub surface_rule: &'static MaterialRule,
     pub lava_y: i32,
     pub vein_y: (i32, i32),
+    pub vein_ranges: [(i32, i32); 2],
+    pub lava_transition_y: i32,
+    pub cleanroom: Option<&'static pumpkin_data::worldgen_profile::CleanroomProfile>,
     pub biome_supplier: crate::biome::ActiveBiomeSupplier,
     pub biome_mixer_seed: i64,
 
@@ -210,6 +213,24 @@ impl VanillaGenerator {
         biome_source: Option<&crate::world_info::BiomeSource>,
         structure_overrides: Option<&[String]>,
     ) -> Self {
+        use pumpkin_data::worldgen_profile::{
+            CLEANROOM_SETTINGS, CLEANROOM_SETTINGS_REFERENCE, cleanroom_profile,
+        };
+        // The selected dimension comes from the validated startup profile.
+        // A generator reference on its own must not activate expanded terrain.
+        if let Some(profile) = cleanroom_profile()
+            && dimension.minecraft_name == profile.dimension.minecraft_name
+            && dimension.min_y == profile.dimension.min_y
+            && dimension.height == profile.dimension.height
+        {
+            return Self::from_cleanroom(seed, profile);
+        }
+        let settings_name = settings_name.filter(|name| {
+            !matches!(
+                name.strip_prefix("minecraft:").unwrap_or(name),
+                CLEANROOM_SETTINGS | CLEANROOM_SETTINGS_REFERENCE
+            )
+        });
         let settings = settings_name
             .and_then(NoiseSettings::from_name)
             .unwrap_or_else(|| NoiseSettings::from_dimension(&dimension));
@@ -230,6 +251,30 @@ impl VanillaGenerator {
             base,
             structure_overrides,
         )
+    }
+
+    #[must_use]
+    pub fn from_cleanroom(
+        seed: Seed,
+        profile: &'static pumpkin_data::worldgen_profile::CleanroomProfile,
+    ) -> Self {
+        let dimension = profile.dimension.clone();
+        let biome_supplier = crate::biome::ActiveBiomeSupplier::from_biome_source(None, &dimension);
+        let mut generator = Self::from_terrain(
+            seed,
+            dimension,
+            profile.settings,
+            profile.surface,
+            biome_supplier,
+            profile.router,
+            None,
+        );
+        generator.lava_y = profile.lava_y;
+        generator.lava_transition_y = profile.lava_transition_y;
+        generator.vein_ranges = profile.vein_ranges;
+        generator.vein_y = (profile.vein_ranges[0].0, profile.vein_ranges[1].1 + 1);
+        generator.cleanroom = Some(profile);
+        generator
     }
 
     #[must_use]
@@ -356,6 +401,8 @@ impl VanillaGenerator {
                 seed.0 as i64,
                 rings,
                 &base_router.multi_noise,
+                base,
+                settings.legacy_random_source,
             )
         } else {
             crate::generation::structure::placement::GlobalStructureCache::new()
@@ -369,6 +416,9 @@ impl VanillaGenerator {
             surface_rule,
             lava_y: -54,
             vein_y: (-60, 52),
+            vein_ranges: super::noise::ore_sampler::VANILLA_VEIN_RANGES,
+            lava_transition_y: -10,
+            cleanroom: None,
             biome_supplier,
             biome_mixer_seed,
             terrain_cache,

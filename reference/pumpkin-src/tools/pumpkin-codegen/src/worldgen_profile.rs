@@ -7,16 +7,21 @@ use std::{
     path::Path,
 };
 
-const PROFILE: &str = "terralith_incendium_extreme_v1";
+pub const PACK_PROFILE: &str = "terralith_incendium_extreme_v1";
+pub const CLEANROOM_PROFILE: &str = "cleanroom_extreme_v1";
 type Resources = BTreeMap<String, Vec<u8>>;
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-pub fn stage(vanilla: &Path, terralith: &Path, incendium: &Path, output: &Path) -> Result<()> {
-    let inputs = [
-        ("vanilla", vanilla.join("data").canonicalize()?),
-        ("terralith", terralith.join("data").canonicalize()?),
-        ("incendium", incendium.join("data").canonicalize()?),
-    ];
+pub fn stage(
+    profile: &str,
+    vanilla: &Path,
+    overlays: &[(&str, std::path::PathBuf)],
+    output: &Path,
+) -> Result<()> {
+    let mut inputs = vec![("vanilla", vanilla.join("data").canonicalize()?)];
+    for (name, pack) in overlays {
+        inputs.push((*name, pack.join("data").canonicalize()?));
+    }
     let parent = output
         .parent()
         .ok_or("Profile output requires a parent directory")?
@@ -58,33 +63,19 @@ pub fn stage(vanilla: &Path, terralith: &Path, incendium: &Path, output: &Path) 
         }
     }
 
-    let overworld = parse_resource(&resources, "minecraft/dimension/overworld.json")?;
-    resolve_dimension_roots(&resources, &overworld)?;
-    let overworld_biomes = validate_climate_biomes(&resources, &overworld, "terralith")?;
-    if overworld_biomes == 0 {
-        return Err("Overworld climate contains no Terralith biome references".into());
-    }
-    let nether_dimension = parse_resource(&resources, "minecraft/dimension/the_nether.json")?;
-    resolve_dimension_roots(&resources, &nether_dimension)?;
-    let nether_biomes = validate_climate_biomes(&resources, &nether_dimension, "incendium")?;
-    if nether_biomes == 0 {
-        return Err("Nether climate contains no Incendium biome references".into());
-    }
-    let nether = parse_resource(&resources, "minecraft/dimension_type/the_nether.json")?;
-    let nether_geometry = (
-        nether["min_y"].as_i64(),
-        nether["height"].as_i64(),
-        nether["logical_height"].as_i64(),
-    );
-    if nether_geometry != (Some(0), Some(256), Some(192)) {
-        return Err("Unexpected Incendium Nether dimension geometry".into());
-    }
+    let (overworld_biomes, nether_biomes) = if profile == CLEANROOM_PROFILE {
+        validate_cleanroom(&resources)?;
+        (0, 0)
+    } else {
+        validate_pack_dimensions(&resources)?
+    };
 
+    let nether = parse_resource(&resources, "minecraft/dimension_type/the_nether.json")?;
     let manifest = json!({
-        "profile": PROFILE,
+        "profile": profile,
         "version": 1,
         "status": "codegen_input",
-        "pack_order": inputs.map(|(name, _)| name),
+        "pack_order": inputs.iter().map(|(name, _)| name).collect::<Vec<_>>(),
         "overworld_target": {
             "min_y": crate::extreme_height::MIN_Y,
             "height": crate::extreme_height::HEIGHT, "logical_height": crate::extreme_height::HEIGHT,
@@ -94,7 +85,8 @@ pub fn stage(vanilla: &Path, terralith: &Path, incendium: &Path, output: &Path) 
             "terralith_climate_biomes": overworld_biomes
         },
         "nether_target": {
-            "min_y": 0, "height": 256, "logical_height": 192,
+            "min_y": nether["min_y"], "height": nether["height"],
+            "logical_height": nether["logical_height"],
             "incendium_climate_biomes": nether_biomes
         },
         "input_sha256": input_hashes,
@@ -126,20 +118,74 @@ pub fn stage(vanilla: &Path, terralith: &Path, incendium: &Path, output: &Path) 
     result
 }
 
-pub fn compile(staged: &Path, output: &Path) -> Result<()> {
+fn validate_pack_dimensions(resources: &Resources) -> Result<(usize, usize)> {
+    let overworld = parse_resource(resources, "minecraft/dimension/overworld.json")?;
+    resolve_dimension_roots(resources, &overworld)?;
+    let overworld_biomes = validate_climate_biomes(resources, &overworld, "terralith")?;
+    if overworld_biomes == 0 {
+        return Err("Overworld climate contains no Terralith biome references".into());
+    }
+    let nether_dimension = parse_resource(resources, "minecraft/dimension/the_nether.json")?;
+    resolve_dimension_roots(resources, &nether_dimension)?;
+    let nether_biomes = validate_climate_biomes(resources, &nether_dimension, "incendium")?;
+    if nether_biomes == 0 {
+        return Err("Nether climate contains no Incendium biome references".into());
+    }
+    let nether = parse_resource(resources, "minecraft/dimension_type/the_nether.json")?;
+    let nether_geometry = (
+        nether["min_y"].as_i64(),
+        nether["height"].as_i64(),
+        nether["logical_height"].as_i64(),
+    );
+    if nether_geometry != (Some(0), Some(256), Some(192)) {
+        return Err("Unexpected Incendium Nether dimension geometry".into());
+    }
+
+    Ok((overworld_biomes, nether_biomes))
+}
+
+fn validate_cleanroom(resources: &Resources) -> Result<()> {
+    let dimension = parse_resource(resources, "minecraft/dimension_type/overworld.json")?;
+    let settings = parse_resource(
+        resources,
+        "minecraft/worldgen/noise_settings/cleanroom_extreme.json",
+    )?;
+    if dimension["min_y"] != -512
+        || dimension["height"] != 1024
+        || dimension["logical_height"] != 1024
+        || dimension["attributes"]["minecraft:visual/cloud_height"].as_f64() != Some(432.0)
+        || settings["noise"]["min_y"] != -512
+        || settings["noise"]["height"] != 1024
+        || settings["noise"]["size_horizontal"] != 1
+        || settings["noise"]["size_vertical"] != 2
+        || settings["sea_level"] != -400
+    {
+        return Err("Unexpected Clean-room dimension or noise settings".into());
+    }
+    Ok(())
+}
+
+pub fn compile(requested: Option<&str>, staged: &Path, output: &Path) -> Result<()> {
     let manifest_bytes = fs::read(staged.join("manifest.json"))?;
     let manifest: Value = serde_json::from_slice(&manifest_bytes)?;
-    if manifest["profile"] != PROFILE
+    let profile = manifest["profile"].as_str();
+    if !matches!(profile, Some(PACK_PROFILE | CLEANROOM_PROFILE))
+        || requested.is_some_and(|requested| Some(requested) != profile)
         || manifest["version"] != 1
         || manifest["status"] != "codegen_input"
     {
-        return Err("Not a staged v1 Terralith/Incendium profile".into());
+        return Err("Invalid staged v1 worldgen profile".into());
     }
     let data = staged.join("data");
     let mut resources = Resources::new();
     read_resources(&data, &data, &mut resources)?;
     if manifest["output_sha256"] != serde_json::to_value(hashes(&resources))? {
         return Err("Staged resources differ from the manifest".into());
+    }
+    let input_sha256 = definition_hash(&resources);
+    if profile == Some(CLEANROOM_PROFILE) {
+        validate_cleanroom(&resources)?;
+        return compile_cleanroom(&data, &resources, &input_sha256, output);
     }
     let dimension =
         |name: &str| parse_resource(&resources, &format!("minecraft/dimension/{name}.json"));
@@ -234,17 +280,6 @@ pub fn compile(staged: &Path, output: &Path) -> Result<()> {
     let settings_tokens = crate::noise_settings::build_profile(overworld.clone(), nether.clone());
     let material_tokens = crate::material_rule::build_profile(&data, &overworld, &nether, &noises);
     let router_tokens = crate::noise_router::build_profile(&data, overworld, nether, &noises);
-    let mut digest = Sha256::new();
-    for (path, hash) in hashes(&resources) {
-        digest.update(path.as_bytes());
-        digest.update([0]);
-        digest.update(hash.as_bytes());
-    }
-    let input_sha256 = digest
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
     let overworld_min = crate::extreme_height::MIN_Y;
     let overworld_height = crate::extreme_height::HEIGHT;
     let lava_y = crate::extreme_height::map_y(-54);
@@ -311,6 +346,103 @@ pub fn compile(staged: &Path, output: &Path) -> Result<()> {
         .and_then(|()| fs::write(output.join("templates.bin"), template_bytes))
         .and_then(|()| fs::write(output.join("decoration.rs"), decoration_source))
     {
+        fs::remove_dir_all(output)?;
+        return Err(error.into());
+    }
+    Ok(())
+}
+
+fn definition_hash(resources: &Resources) -> String {
+    let mut digest = Sha256::new();
+    for (path, hash) in hashes(resources) {
+        digest.update(path.as_bytes());
+        digest.update([0]);
+        digest.update(hash.as_bytes());
+    }
+    digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+#[derive(serde::Deserialize)]
+struct CleanroomVerticalGeneration {
+    lava_level: i32,
+    lava_transition_offset: i32,
+    iron_vein_y: (i32, i32),
+    copper_vein_y: (i32, i32),
+}
+
+fn compile_cleanroom(data: &Path, resources: &Resources, hash: &str, output: &Path) -> Result<()> {
+    let dimension_json = parse_resource(resources, "minecraft/dimension_type/overworld.json")?;
+    let settings = parse_resource(
+        resources,
+        "minecraft/worldgen/noise_settings/cleanroom_extreme.json",
+    )?;
+    let vertical: CleanroomVerticalGeneration =
+        serde_json::from_value(settings["pumpkin:vertical_generation"].clone())?;
+    let lava_y = vertical.lava_level;
+    let lava_transition_y = lava_y
+        .checked_add(vertical.lava_transition_offset)
+        .ok_or("Invalid Clean-room lava transition offset")?;
+    let (iron_min, iron_max) = vertical.iron_vein_y;
+    let (copper_min, copper_max) = vertical.copper_vein_y;
+    if !(-512..-400).contains(&lava_y)
+        || !(lava_y..-400).contains(&lava_transition_y)
+        || !(-512..=iron_max).contains(&iron_min)
+        || !(iron_max..copper_max).contains(&copper_min)
+        || copper_max >= 512
+    {
+        return Err("Invalid Clean-room vertical generation bounds".into());
+    }
+    let dimension = crate::dimension::build_cleanroom(&dimension_json)?;
+    let dimension_json = serde_json::to_string(&dimension_json)?;
+    let settings_tokens = crate::noise_settings::build_cleanroom(settings.clone())?;
+    let router = crate::noise_router::build_cleanroom(data, &settings);
+    let material = crate::material_rule::build_cleanroom(data, &settings);
+    let carvers = ["cave", "cave_extra_underground", "canyon"]
+        .into_iter()
+        .map(|name| {
+            let value =
+                parse_resource(resources, &format!("minecraft/worldgen/carver/{name}.json"))?;
+            let ident = quote::format_ident!("{}", name.to_uppercase());
+            let config = crate::carver::config(&value);
+            Ok(quote::quote! { pub static #ident: crate::carver::CarverConfig = #config; })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let tokens = quote::quote! {
+        use crate::noise_router::*;
+        use crate::material_rule::*;
+        use crate::noise_settings::{NoiseSettings, GenerationShapeConfig};
+        use crate::noise_parameter::DoublePerlinNoiseParameters;
+        use pumpkin_util::y_offset::{YOffset, Absolute, AboveBottom, BelowTop, RelativeToSeaLevel};
+        use crate::carver::*;
+        use pumpkin_util::math::{float_provider::*, int_provider::*};
+        #dimension
+        #settings_tokens
+        #router
+        #material
+        #(#carvers)*
+
+        pub static PROFILE: super::CleanroomProfile = super::CleanroomProfile {
+            definition_sha256: #hash,
+            dimension: crate::dimension::Dimension::OVERWORLD_CLEANROOM_EXTREME,
+            dimension_json: #dimension_json,
+            settings: &CLEANROOM_EXTREME_SETTINGS,
+            router: &CLEANROOM_EXTREME_BASE_NOISE_ROUTER,
+            surface: &CLEANROOM_EXTREME_SURFACE,
+            carvers: [&CAVE, &CAVE_EXTRA_UNDERGROUND, &CANYON],
+            lava_y: #lava_y,
+            lava_transition_y: #lava_transition_y,
+            vein_ranges: [(#iron_min, #iron_max), (#copper_min, #copper_max)],
+        };
+    };
+    fs::create_dir(output)?;
+    if let Err(error) = fs::write(
+        output.join("cleanroom.rs"),
+        tokens.to_string().replace(" ;", " ;\n"),
+    ) {
         fs::remove_dir_all(output)?;
         return Err(error.into());
     }

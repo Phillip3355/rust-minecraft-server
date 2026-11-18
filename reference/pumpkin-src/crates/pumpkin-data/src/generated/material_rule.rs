@@ -37,6 +37,10 @@ impl MaterialRule {
     pub fn from_name(name: &str) -> Option<&'static Self> {
         let name = name.strip_prefix("minecraft:").unwrap_or(name);
         match name {
+            crate::worldgen_profile::CLEANROOM_SETTINGS
+            | crate::worldgen_profile::CLEANROOM_SETTINGS_REFERENCE => {
+                crate::worldgen_profile::cleanroom_profile().map(|profile| profile.surface)
+            }
             "overworld" | "amplified" | "large_biomes" => Some(&OVERWORLD),
             "nether" => Some(&NETHER),
             "end" => Some(&END),

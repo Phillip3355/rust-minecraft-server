@@ -1998,6 +1998,8 @@ struct NoiseRouterRepr {
     continents: DensityFunctionRepr,
     erosion: DensityFunctionRepr,
     depth: DensityFunctionRepr,
+    #[serde(default)]
+    climate_depth: Option<DensityFunctionRepr>,
     ridges: DensityFunctionRepr,
     #[serde(rename(deserialize = "preliminarySurfaceLevel"))]
     preliminary_surface_level: DensityFunctionRepr,
@@ -2023,6 +2025,9 @@ impl NoiseRouterRepr {
         self.continents.slice_uniform_axes(AXES_ALL);
         self.erosion.slice_uniform_axes(AXES_ALL);
         self.depth.slice_uniform_axes(AXES_ALL);
+        if let Some(depth) = &mut self.climate_depth {
+            depth.slice_uniform_axes(AXES_ALL);
+        }
         self.ridges.slice_uniform_axes(AXES_ALL);
         self.preliminary_surface_level.slice_uniform_axes(AXES_ALL);
         self.final_density.slice_uniform_axes(AXES_ALL);
@@ -2041,6 +2046,9 @@ impl NoiseRouterRepr {
         self.continents.optimize();
         self.erosion.optimize();
         self.depth.optimize();
+        if let Some(depth) = &mut self.climate_depth {
+            depth.optimize();
+        }
         self.ridges.optimize();
         self.preliminary_surface_level.optimize();
         self.final_density.optimize();
@@ -2146,11 +2154,15 @@ impl NoiseRouterRepr {
             &mut multinoise_nodes,
             &mut multinoise_lookup_map,
         );
-        let multi_depth = self.depth.get_index_for_component(
-            &mut multinoise_component_stack,
-            &mut multinoise_nodes,
-            &mut multinoise_lookup_map,
-        );
+        let multi_depth = self
+            .climate_depth
+            .as_ref()
+            .unwrap_or(&self.depth)
+            .get_index_for_component(
+                &mut multinoise_component_stack,
+                &mut multinoise_nodes,
+                &mut multinoise_lookup_map,
+            );
 
         let mut vein_component_stack = Vec::new();
         let mut vein_nodes = Vec::new();
@@ -2991,6 +3003,9 @@ fn read_noise_router(
         continents: parse_vanilla_df(base_df_dir, nr.get("continents").unwrap_or(&zero)),
         erosion: parse_vanilla_df(base_df_dir, nr.get("erosion").unwrap_or(&zero)),
         depth: parse_vanilla_df(base_df_dir, nr.get("depth").unwrap_or(&zero)),
+        climate_depth: nr
+            .get("climate_depth")
+            .map(|value| parse_vanilla_df(base_df_dir, value)),
         ridges: parse_vanilla_df(base_df_dir, nr.get("ridges").unwrap_or(&zero)),
         preliminary_surface_level: parse_vanilla_df(base_df_dir, preliminary_surface_level),
         final_density: parse_vanilla_df(base_df_dir, nr.get("final_density").unwrap_or(&zero)),
@@ -3026,6 +3041,19 @@ fn load_vanilla_noise_routers() -> NoiseRouterReprs {
         nether,
         end,
         end_islands,
+    }
+}
+
+pub fn build_cleanroom(data: &std::path::Path, value: &serde_json::Value) -> TokenStream {
+    let resources = DensityResources {
+        directory: &data.join("minecraft/worldgen/density_function"),
+        profile: None,
+    };
+    let (router, compiled) = read_noise_router(value, &resources, "overworld")
+        .into_token_stream_compiled("cleanroom_extreme");
+    quote! {
+        #compiled
+        pub const CLEANROOM_EXTREME_BASE_NOISE_ROUTER: BaseNoiseRouters = #router;
     }
 }
 
@@ -3491,6 +3519,7 @@ pub fn build() -> TokenStream {
             pub fn from_name(name: &str) -> Option<&'static Self> {
                 let name = name.strip_prefix("minecraft:").unwrap_or(name);
                 match name {
+                    crate::worldgen_profile::CLEANROOM_SETTINGS | crate::worldgen_profile::CLEANROOM_SETTINGS_REFERENCE => crate::worldgen_profile::cleanroom_profile().map(|profile| profile.router),
                     "overworld" => Some(&OVERWORLD_BASE_NOISE_ROUTER),
                     "amplified" => Some(&AMPLIFIED_BASE_NOISE_ROUTER),
                     "large_biomes" => Some(&LARGE_BIOMES_BASE_NOISE_ROUTER),

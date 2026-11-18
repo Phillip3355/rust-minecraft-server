@@ -286,6 +286,11 @@ fn settings_from_json(noise_settings: NoiseSettingsFileStruct, stem: &str) -> No
     }
 }
 
+pub fn build_cleanroom(value: serde_json::Value) -> serde_json::Result<TokenStream> {
+    let settings = settings_from_json(serde_json::from_value(value)?, "overworld");
+    Ok(quote! { pub const CLEANROOM_EXTREME_SETTINGS: NoiseSettings = #settings; })
+}
+
 pub fn build_profile(overworld: serde_json::Value, nether: serde_json::Value) -> TokenStream {
     let mut overworld = settings_from_json(
         serde_json::from_value(overworld).expect("Invalid Terralith noise settings"),
@@ -428,6 +433,7 @@ pub fn build() -> TokenStream {
             pub fn from_name(name: &str) -> Option<&'static Self> {
                 let name = name.strip_prefix("minecraft:").unwrap_or(name);
                 match name {
+                    crate::worldgen_profile::CLEANROOM_SETTINGS | crate::worldgen_profile::CLEANROOM_SETTINGS_REFERENCE => crate::worldgen_profile::cleanroom_profile().map(|profile| profile.settings),
                     "overworld" => Some(&Self::OVERWORLD),
                     "amplified" => Some(&Self::AMPLIFIED),
                     "large_biomes" => Some(&Self::LARGE_BIOMES),

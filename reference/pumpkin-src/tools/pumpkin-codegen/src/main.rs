@@ -124,15 +124,36 @@ pub fn main() {
         .first()
         .is_some_and(|arg| arg == "stage-worldgen-profile")
     {
-        let [_, output] = filters.as_slice() else {
-            eprintln!("Usage: pumpkin-codegen stage-worldgen-profile OUTPUT_DIRECTORY");
-            std::process::exit(2);
+        let (profile, output) = match filters.as_slice() {
+            [_, output] => (worldgen_profile::PACK_PROFILE, output),
+            [_, flag, profile, output] if flag == "--profile" => (profile.as_str(), output),
+            _ => {
+                eprintln!(
+                    "Usage: pumpkin-codegen stage-worldgen-profile [--profile ID] OUTPUT_DIRECTORY"
+                );
+                std::process::exit(2);
+            }
         };
         let packs = manifest_dir.join("../../../datapacks");
+        let vanilla = manifest_dir.join("../../assets/datapack");
+        let overlays = match profile {
+            worldgen_profile::PACK_PROFILE => vec![
+                ("terralith", packs.join("Terralith")),
+                ("incendium", packs.join("Incendium")),
+            ],
+            worldgen_profile::CLEANROOM_PROFILE => vec![(
+                "cleanroom",
+                manifest_dir.join("../../../../profiles").join(profile),
+            )],
+            _ => {
+                eprintln!("Unknown worldgen profile {profile}");
+                std::process::exit(2);
+            }
+        };
         if let Err(error) = worldgen_profile::stage(
-            &manifest_dir.join("../../assets/datapack"),
-            &packs.join("Terralith"),
-            &packs.join("Incendium"),
+            profile,
+            &vanilla,
+            &overlays,
             &std::path::absolute(output).expect("Cannot resolve profile output path"),
         ) {
             eprintln!("Worldgen profile staging failed: {error}");
@@ -144,15 +165,23 @@ pub fn main() {
         .first()
         .is_some_and(|arg| arg == "compile-worldgen-profile")
     {
-        let [_, input, output] = filters.as_slice() else {
-            eprintln!(
-                "Usage: pumpkin-codegen compile-worldgen-profile STAGED_DIRECTORY OUTPUT_DIRECTORY"
-            );
-            std::process::exit(2);
+        let (profile, input, output) = match filters.as_slice() {
+            [_, input, output] => (None, input, output),
+            [_, flag, profile, input, output] if flag == "--profile" => {
+                (Some(profile.as_str()), input, output)
+            }
+            _ => {
+                eprintln!(
+                    "Usage: pumpkin-codegen compile-worldgen-profile [--profile ID] STAGED_DIRECTORY OUTPUT_DIRECTORY"
+                );
+                std::process::exit(2);
+            }
         };
-        if let Err(error) =
-            worldgen_profile::compile(std::path::Path::new(input), std::path::Path::new(output))
-        {
+        if let Err(error) = worldgen_profile::compile(
+            profile,
+            std::path::Path::new(input),
+            std::path::Path::new(output),
+        ) {
             eprintln!("Worldgen profile compilation failed: {error}");
             std::process::exit(1);
         }

@@ -8,21 +8,32 @@ const MANIFEST_URL: &str = "https://piston-meta.mojang.com/mc/game/version_manif
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rustc-check-cfg=cfg(pumpkin_compiled_worldgen_profile)");
+    println!("cargo:rustc-check-cfg=cfg(pumpkin_compiled_cleanroom)");
     println!("cargo:rerun-if-env-changed=PUMPKIN_COMPILED_WORLDGEN_PROFILE");
     if let Some(directory) = std::env::var_os("PUMPKIN_COMPILED_WORLDGEN_PROFILE") {
-        let source = Path::new(&directory)
-            .join("worldgen_profile.rs")
-            .canonicalize()?;
-        println!("cargo:rerun-if-changed={}", source.display());
-        println!(
-            "cargo:rerun-if-changed={}",
-            source.with_file_name("templates.bin").display()
-        );
-        println!(
-            "cargo:rustc-env=PUMPKIN_WORLDGEN_PROFILE_SOURCE={}",
-            source.display()
-        );
-        println!("cargo:rustc-cfg=pumpkin_compiled_worldgen_profile");
+        let directory = Path::new(&directory);
+        let cleanroom = directory.join("cleanroom.rs");
+        println!("cargo:rerun-if-changed={}", directory.display());
+        if cleanroom.is_file() {
+            let source = cleanroom.canonicalize()?;
+            println!(
+                "cargo:rustc-env=PUMPKIN_CLEANROOM_SOURCE={}",
+                source.display()
+            );
+            println!("cargo:rustc-cfg=pumpkin_compiled_cleanroom");
+        } else {
+            let source = directory.join("worldgen_profile.rs").canonicalize()?;
+            println!("cargo:rerun-if-changed={}", source.display());
+            println!(
+                "cargo:rerun-if-changed={}",
+                source.with_file_name("templates.bin").display()
+            );
+            println!(
+                "cargo:rustc-env=PUMPKIN_WORLDGEN_PROFILE_SOURCE={}",
+                source.display()
+            );
+            println!("cargo:rustc-cfg=pumpkin_compiled_worldgen_profile");
+        }
     }
 
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?);

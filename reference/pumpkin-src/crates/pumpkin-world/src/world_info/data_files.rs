@@ -268,67 +268,7 @@ fn read_world_gen_settings_file(path: &Path) -> Option<WorldGenSettings> {
                     warn!("{} has no seed", path.display());
                     return None;
                 };
-                let seed = c.get_long("seed")?;
-                let mut dimensions = std::collections::HashMap::new();
-                if let Some(dims_comp) = c.get_compound("dimensions") {
-                    for (dim_name, dim_tag) in &dims_comp.child_tags {
-                        if let NbtTag::Compound(dim_c) = dim_tag {
-                            let dim_type = dim_c.get_string("type").unwrap_or(dim_name).to_string();
-                            if let Some(gen_c) = dim_c.get_compound("generator") {
-                                let generator_type = gen_c
-                                    .get_string("type")
-                                    .unwrap_or("minecraft:noise")
-                                    .to_string();
-                                let settings = gen_c
-                                    .get_string("settings")
-                                    .map(|s| {
-                                        crate::world_info::GeneratorSettings::Reference(
-                                            s.to_string(),
-                                        )
-                                    })
-                                    .or_else(|| {
-                                        gen_c.get_compound("settings").map(|settings_c| {
-                                            let json_val = nbt_tag_to_json(&NbtTag::Compound(
-                                                settings_c.clone(),
-                                            ));
-                                            crate::world_info::GeneratorSettings::Compound(json_val)
-                                        })
-                                    });
-                                let biome_source = gen_c.get_compound("biome_source").map(|bs_c| {
-                                    let biome_type = bs_c
-                                        .get_string("type")
-                                        .unwrap_or("minecraft:multi_noise")
-                                        .to_string();
-                                    if let Some(preset) = bs_c.get_string("preset") {
-                                        crate::world_info::BiomeSource::WithPreset {
-                                            preset: preset.to_string(),
-                                            biome_type,
-                                        }
-                                    } else if let Some(biome) = bs_c.get_string("biome") {
-                                        crate::world_info::BiomeSource::Fixed {
-                                            biome: biome.to_string(),
-                                            biome_type,
-                                        }
-                                    } else {
-                                        crate::world_info::BiomeSource::Simple { biome_type }
-                                    }
-                                });
-                                dimensions.insert(
-                                    dim_name.to_string(),
-                                    crate::world_info::Dimension {
-                                        generator: crate::world_info::Generator {
-                                            settings,
-                                            biome_source,
-                                            generator_type,
-                                        },
-                                        dimension_type: dim_type,
-                                    },
-                                );
-                            }
-                        }
-                    }
-                }
-                Some(WorldGenSettings { seed, dimensions })
+                parse_world_gen_settings(c)
             }
             Err(e) => {
                 warn!("Failed to deserialize {}: {e}", path.display());
@@ -340,6 +280,65 @@ fn read_world_gen_settings_file(path: &Path) -> Option<WorldGenSettings> {
             None
         }
     }
+}
+
+pub(super) fn parse_world_gen_settings(c: &NbtCompound) -> Option<WorldGenSettings> {
+    let seed = c.get_long("seed")?;
+    let mut dimensions = std::collections::HashMap::new();
+    if let Some(dims_comp) = c.get_compound("dimensions") {
+        for (dim_name, dim_tag) in &dims_comp.child_tags {
+            if let NbtTag::Compound(dim_c) = dim_tag {
+                let dim_type = dim_c.get_string("type").unwrap_or(dim_name).to_string();
+                if let Some(gen_c) = dim_c.get_compound("generator") {
+                    let generator_type = gen_c
+                        .get_string("type")
+                        .unwrap_or("minecraft:noise")
+                        .to_string();
+                    let settings = gen_c
+                        .get_string("settings")
+                        .map(|s| crate::world_info::GeneratorSettings::Reference(s.to_string()))
+                        .or_else(|| {
+                            gen_c.get_compound("settings").map(|settings_c| {
+                                let json_val =
+                                    nbt_tag_to_json(&NbtTag::Compound(settings_c.clone()));
+                                crate::world_info::GeneratorSettings::Compound(json_val)
+                            })
+                        });
+                    let biome_source = gen_c.get_compound("biome_source").map(|bs_c| {
+                        let biome_type = bs_c
+                            .get_string("type")
+                            .unwrap_or("minecraft:multi_noise")
+                            .to_string();
+                        if let Some(preset) = bs_c.get_string("preset") {
+                            crate::world_info::BiomeSource::WithPreset {
+                                preset: preset.to_string(),
+                                biome_type,
+                            }
+                        } else if let Some(biome) = bs_c.get_string("biome") {
+                            crate::world_info::BiomeSource::Fixed {
+                                biome: biome.to_string(),
+                                biome_type,
+                            }
+                        } else {
+                            crate::world_info::BiomeSource::Simple { biome_type }
+                        }
+                    });
+                    dimensions.insert(
+                        dim_name.to_string(),
+                        crate::world_info::Dimension {
+                            generator: crate::world_info::Generator {
+                                settings,
+                                biome_source,
+                                generator_type,
+                            },
+                            dimension_type: dim_type,
+                        },
+                    );
+                }
+            }
+        }
+    }
+    Some(WorldGenSettings { seed, dimensions })
 }
 
 fn world_gen_settings_payload(mut compound: &NbtCompound) -> Option<&NbtCompound> {
@@ -361,7 +360,20 @@ pub fn write_world_gen_settings(
 ) -> Result<(), WorldInfoError> {
     let dir = ensure_minecraft_data_dir(level_folder)?;
     let path = dir.join("world_gen_settings.dat");
-    let file = File::create(&path)?;
+    let mut file = tempfile::NamedTempFile::new_in(&dir)?;
+    let mut root = NbtCompound::new();
+    root.put_compound("data", world_gen_settings_to_nbt(settings, data_version));
+    pumpkin_nbt::nbt_compress::write_gzip_compound_tag(root, file.as_file_mut())
+        .map_err(|e| WorldInfoError::SerializationError(e.to_string()))?;
+    file.as_file().sync_all()?;
+    file.persist(path).map_err(|error| error.error)?;
+    Ok(())
+}
+
+pub(super) fn world_gen_settings_to_nbt(
+    settings: &WorldGenSettings,
+    data_version: i32,
+) -> NbtCompound {
     let mut inner = NbtCompound::new();
     inner.put_int("DataVersion", data_version);
     inner.put_long("seed", settings.seed);
@@ -406,11 +418,7 @@ pub fn write_world_gen_settings(
         dims_comp.put_compound(dim_name, dim_comp);
     }
     inner.put_compound("dimensions", dims_comp);
-
-    let mut root = NbtCompound::new();
-    root.put_compound("data", inner);
-    pumpkin_nbt::nbt_compress::write_gzip_compound_tag(root, BufWriter::new(file))
-        .map_err(|e| WorldInfoError::SerializationError(e.to_string()))
+    inner
 }
 
 #[must_use]

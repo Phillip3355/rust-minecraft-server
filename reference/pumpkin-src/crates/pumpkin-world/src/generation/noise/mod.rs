@@ -11,7 +11,7 @@ use crate::generation::{
         aquifer_sampler::{
             AquiferSampler, AquiferSamplerImpl, SeaLevelAquiferSampler, WorldAquiferSampler,
         },
-        ore_sampler::OreVeinSampler,
+        ore_sampler::{OreVeinSampler, VANILLA_VEIN_RANGES},
     },
     proto_chunk::StandardChunkFluidLevelSampler,
     section_coords,
@@ -121,6 +121,14 @@ pub struct ChunkNoiseGenerator<'a> {
 }
 
 impl<'a> ChunkNoiseGenerator<'a> {
+    pub(crate) fn set_vein_ranges(&mut self, ranges: [(i32, i32); 2]) {
+        for sampler in &mut self.state_sampler.samplers {
+            if let BlockStateSampler::Ore(ore) = sampler {
+                ore.set_ranges(ranges);
+            }
+        }
+    }
+
     #[expect(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
@@ -163,7 +171,7 @@ impl<'a> ChunkNoiseGenerator<'a> {
         let samplers: Box<[BlockStateSampler]> = if ore_veins {
             Box::new([
                 BlockStateSampler::Aquifer(aquifer_sampler),
-                BlockStateSampler::Ore(OreVeinSampler),
+                BlockStateSampler::Ore(OreVeinSampler::new(VANILLA_VEIN_RANGES)),
             ])
         } else {
             Box::new([BlockStateSampler::Aquifer(aquifer_sampler)])

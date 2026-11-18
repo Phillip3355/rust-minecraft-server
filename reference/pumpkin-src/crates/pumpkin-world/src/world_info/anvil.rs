@@ -18,11 +18,11 @@ use crate::world_info::{
     DataPacks, MAXIMUM_SUPPORTED_LEVEL_VERSION, MAXIMUM_SUPPORTED_WORLD_DATA_VERSION,
     MINIMUM_SUPPORTED_LEVEL_VERSION, MINIMUM_SUPPORTED_WORLD_DATA_VERSION, WorldVersion,
     data_files::{
-        minecraft_data_dir, read_game_rules, read_wandering_trader, read_weather,
-        read_world_clocks, read_world_gen_settings, write_custom_boss_events_stub,
-        write_game_rules, write_random_sequences_stub, write_scheduled_events_stub,
-        write_scoreboard_stub, write_stopwatches_stub, write_wandering_trader, write_weather,
-        write_world_clocks, write_world_gen_settings,
+        minecraft_data_dir, parse_world_gen_settings, read_game_rules, read_wandering_trader,
+        read_weather, read_world_clocks, read_world_gen_settings, world_gen_settings_to_nbt,
+        write_custom_boss_events_stub, write_game_rules, write_random_sequences_stub,
+        write_scheduled_events_stub, write_scoreboard_stub, write_stopwatches_stub,
+        write_wandering_trader, write_weather, write_world_clocks, write_world_gen_settings,
     },
     default_data_packs,
 };
@@ -404,7 +404,20 @@ impl WorldInfoReader for AnvilLevelInfo {
                 Some(super::worldgen_profile::WorldgenProfile::from_nbt(profile)?);
         }
 
-        if let Some(wgs) = read_world_gen_settings(level_folder) {
+        let saved_settings = read_world_gen_settings(level_folder);
+        if level_data
+            .worldgen_profile
+            .as_ref()
+            .is_some_and(|profile| profile.id == super::worldgen_profile::CLEANROOM_PROFILE_ID)
+        {
+            let inline = data
+                .get_compound(WORLD_GEN_SETTINGS_TAG)
+                .and_then(parse_world_gen_settings);
+            if inline.is_none() || inline != saved_settings {
+                return Err(WorldInfoError::WorldgenProfileMismatch);
+            }
+        }
+        if let Some(wgs) = saved_settings {
             level_data.world_gen_settings = wgs;
         }
 
@@ -489,8 +502,23 @@ impl WorldInfoWriter for AnvilLevelInfo {
             }
         }
         level_data_to_nbt(&level_data, &mut data_comp);
+        let cleanroom = info
+            .worldgen_profile
+            .as_ref()
+            .is_some_and(|profile| profile.id == super::worldgen_profile::CLEANROOM_PROFILE_ID);
+        if cleanroom {
+            // Publish the required generator selection before publishing level.dat.
+            write_world_gen_settings(
+                level_folder,
+                &info.world_gen_settings,
+                level_data.data_version,
+            )?;
+            data_comp.put_compound(
+                WORLD_GEN_SETTINGS_TAG,
+                world_gen_settings_to_nbt(&info.world_gen_settings, level_data.data_version),
+            );
+        }
         root.put_compound(LEVEL_DATA_TAG, data_comp);
-
         write_gzip_compound_tag(root, File::create(&path_new)?)
             .map_err(|e| WorldInfoError::SerializationError(e.to_string()))?;
 
@@ -509,8 +537,9 @@ impl WorldInfoWriter for AnvilLevelInfo {
         }
 
         // world_gen_settings.dat
-        if let Err(e) =
-            write_world_gen_settings(level_folder, &info.world_gen_settings, data_version)
+        if !cleanroom
+            && let Err(e) =
+                write_world_gen_settings(level_folder, &info.world_gen_settings, data_version)
         {
             error!("Failed to write world_gen_settings.dat: {e}");
         }

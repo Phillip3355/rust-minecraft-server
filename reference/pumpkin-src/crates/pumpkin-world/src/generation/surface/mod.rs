@@ -74,6 +74,7 @@ pub struct MaterialRuleContext<'a> {
 pub struct VeinContext<'a> {
     pub volume: DensityVolume,
     pub vein_toggle: DensityBuffer,
+    pub vein_ranges: [(i32, i32); 2],
     pub vein_ridged: Option<DensityBuffer>,
     pub router: ChunkVeinRouter<'a>,
     pub ore_random_deriver: &'a XoroshiroSplitter,
@@ -85,21 +86,14 @@ impl VeinContext<'_> {
             return -1.0;
         };
         let toggle = self.vein_toggle[index];
-        let input = if is_iron {
-            if !(-60..-8).contains(&y) {
-                return -1.0;
-            }
-            let closest_to_bound = (-8 - y).min(y - -60) as f32;
-            let edge_roundoff = (closest_to_bound.clamp(0.0, 20.0) * 0.01) - 0.2;
-            -toggle - 0.4 + edge_roundoff
-        } else {
-            if !(0..50).contains(&y) {
-                return -1.0;
-            }
-            let closest_to_bound = (50 - y).min(y) as f32;
-            let edge_roundoff = (closest_to_bound.clamp(0.0, 20.0) * 0.01) - 0.2;
-            toggle - 0.4 + edge_roundoff
-        };
+        let (min_y, max_y) = self.vein_ranges[usize::from(!is_iron)];
+        if !(min_y..max_y).contains(&y) {
+            return -1.0;
+        }
+        let closest_to_bound = (max_y - y).min(y - min_y) as f32;
+        let edge_roundoff = (closest_to_bound.clamp(0.0, 20.0) * 0.01) - 0.2;
+        let signed_toggle = if is_iron { -toggle } else { toggle };
+        let input = signed_toggle - 0.4 + edge_roundoff;
         if input < 0.0 {
             return -1.0;
         }
@@ -180,10 +174,6 @@ impl<'a> MaterialRuleContext<'a> {
         rule: &pumpkin_data::material_rule::OreVeinMaterialRule,
     ) -> Option<&'static pumpkin_data::BlockState> {
         let block_y = self.block_pos_y;
-        if block_y < rule.min_y || block_y >= rule.max_y {
-            return None;
-        }
-
         let vein_context = self.vein_context.as_deref_mut()?;
         let density =
             vein_context.get_density(rule.is_iron, self.block_pos_x, block_y, self.block_pos_z);

@@ -13,6 +13,35 @@ pub enum HeightProvider {
 }
 
 impl HeightProvider {
+    pub fn cleanroom(&self) -> Self {
+        use pumpkin_util::y_offset::Absolute;
+        let anchor = |value| match value {
+            YOffset::Absolute(Absolute { absolute }) => YOffset::Absolute(Absolute {
+                absolute: pumpkin_util::y_offset::extreme_overworld_y(i32::from(absolute))
+                    .clamp(-512, 511) as i16,
+            }),
+            relative => relative,
+        };
+        match self {
+            Self::Uniform(p) => Self::Uniform(UniformHeightProvider {
+                min_inclusive: anchor(p.min_inclusive),
+                max_inclusive: anchor(p.max_inclusive),
+            }),
+            Self::Trapezoid(p) => Self::Trapezoid(TrapezoidHeightProvider {
+                min_inclusive: anchor(p.min_inclusive),
+                max_inclusive: anchor(p.max_inclusive),
+                plateau: p.plateau,
+            }),
+            Self::VeryBiasedToBottom(p) => {
+                Self::VeryBiasedToBottom(VeryBiasedToBottomHeightProvider {
+                    min_inclusive: anchor(p.min_inclusive),
+                    max_inclusive: anchor(p.max_inclusive),
+                    inner: p.inner,
+                })
+            }
+        }
+    }
+
     pub fn get(&self, random: &mut RandomGenerator, min_y: i16, height: u16) -> i32 {
         match self {
             Self::Uniform(provider) => provider.get(random, min_y, height),

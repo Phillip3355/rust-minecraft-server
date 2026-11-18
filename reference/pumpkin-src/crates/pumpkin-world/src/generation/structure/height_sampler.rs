@@ -60,7 +60,8 @@ impl<'a> NoiseHeightSampler<'a> {
                 Block::from_state_id(settings.default_fluid.id),
             ),
             FluidLevel::new(self.generator.lava_y, &Block::LAVA),
-        );
+        )
+        .with_lava_transition(self.generator.lava_transition_y);
         let volume = DensityVolume::with_block_step(
             1,
             shape.height as usize,
