@@ -125,15 +125,23 @@ pub fn select_features(biome_ids: &[u8], step: usize) -> Vec<(usize, PlacedFeatu
             step,
             &NETHER_BIOME_IDS,
             &NETHER_FEATURES_PER_STEP,
+            Biome::from_id,
         )
     } else if biome_ids.iter().any(|b| END_BIOME_IDS.contains(b)) {
-        select_features_for_dimension(biome_ids, step, &END_BIOME_IDS, &END_FEATURES_PER_STEP)
+        select_features_for_dimension(
+            biome_ids,
+            step,
+            &END_BIOME_IDS,
+            &END_FEATURES_PER_STEP,
+            Biome::from_id,
+        )
     } else {
         select_features_for_dimension(
             biome_ids,
             step,
             &OVERWORLD_BIOME_IDS,
             &OVERWORLD_FEATURES_PER_STEP,
+            Biome::from_id,
         )
     }
 }
@@ -143,6 +151,7 @@ fn select_features_for_dimension(
     step: usize,
     allowed_biomes: &HashSet<u8>,
     features_per_step: &[Vec<PlacedFeature>],
+    biome_by_id: fn(u8) -> Option<&'static Biome>,
 ) -> Vec<(usize, PlacedFeature)> {
     let mut selected = HashSet::new();
 
@@ -150,8 +159,7 @@ fn select_features_for_dimension(
         if !allowed_biomes.contains(biome_id) {
             continue;
         }
-        if let Some(features) = Biome::from_id(*biome_id).and_then(|biome| biome.features.get(step))
-        {
+        if let Some(features) = biome_by_id(*biome_id).and_then(|biome| biome.features.get(step)) {
             selected.extend(features.iter().copied());
         }
     }
@@ -164,6 +172,41 @@ fn select_features_for_dimension(
         .enumerate()
         .filter(|(_, feature)| selected.contains(feature))
         .collect()
+}
+
+pub fn select_profile_features(
+    biome_ids: &[u8],
+    step: usize,
+    nether: bool,
+) -> Vec<(usize, PlacedFeature)> {
+    type Order = (HashSet<u8>, Vec<Vec<PlacedFeature>>);
+    static OVERWORLD: LazyLock<Order> = LazyLock::new(|| profile_order(false));
+    static NETHER: LazyLock<Order> = LazyLock::new(|| profile_order(true));
+    let (allowed, order) = if nether { &*NETHER } else { &*OVERWORLD };
+    select_features_for_dimension(
+        biome_ids,
+        step,
+        allowed,
+        order,
+        pumpkin_data::worldgen_profile::generation_biome,
+    )
+}
+
+fn profile_order(nether: bool) -> (HashSet<u8>, Vec<Vec<PlacedFeature>>) {
+    let terrain = pumpkin_data::worldgen_profile::terrain_profile()
+        .expect("Profile decoration requires the compiled profile");
+    let dimension = if nether {
+        &terrain.nether
+    } else {
+        &terrain.overworld
+    };
+    let mut ids = HashSet::new();
+    let biomes: Vec<_> = dimension
+        .climate
+        .iter()
+        .filter_map(|&(_, biome)| ids.insert(biome.id).then_some(biome))
+        .collect();
+    (ids, sort_features_per_step(&biomes))
 }
 
 fn sort_features_per_step(biomes: &[&Biome]) -> Vec<Vec<PlacedFeature>> {

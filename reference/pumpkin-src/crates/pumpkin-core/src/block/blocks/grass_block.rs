@@ -174,7 +174,7 @@ fn biome_bonemeal_state(
         .filter_map(|key| PLACED_FEATURES.get(key))
         .filter_map(|feature| match &feature.feature {
             Feature::Named(key) if BONE_MEAL_FEATURES.contains(key) => Some(*key),
-            Feature::Named(_) | Feature::Inlined(_) => None,
+            Feature::Named(_) | Feature::Inlined(_) | Feature::Placed(_) => None,
         })
         .collect();
     if features.is_empty() {

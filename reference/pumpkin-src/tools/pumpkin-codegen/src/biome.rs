@@ -308,8 +308,9 @@ fn emit_biome(
     name: &str,
     format_name: &proc_macro2::Ident,
     index: &LitInt,
-    be_network_id: u8,
+    be_network_id: TokenStream,
     biome: &Biome,
+    profile: bool,
 ) -> TokenStream {
     let has_precipitation = biome.has_precipitation;
     let temperature = biome.temperature;
@@ -319,8 +320,13 @@ fn emit_biome(
         .iter()
         .map(|c| {
             let name = c.strip_prefix("minecraft:").unwrap_or(c);
-            let variant_name = format_ident!("{}", name.to_uppercase());
-            quote! { &crate::carver::#variant_name }
+            if profile {
+                let ident = profile_carver_ident(&crate::profile_resources::canonical_id(c));
+                quote! { &carvers::#ident }
+            } else {
+                let variant_name = format_ident!("{}", name.to_uppercase());
+                quote! { &crate::carver::#variant_name }
+            }
         })
         .collect();
     let features: Vec<TokenStream> = biome
@@ -330,9 +336,14 @@ fn emit_biome(
             let step_features: Vec<TokenStream> = step
                 .iter()
                 .map(|f| {
-                    let name = f.strip_prefix("minecraft:").unwrap_or(f);
-                    let variant_name = format_ident!("{}", name.to_pascal_case());
-                    quote! { crate::placed_feature::PlacedFeature::#variant_name }
+                    if profile {
+                        let id = crate::profile_resources::canonical_id(f);
+                        quote! { crate::placed_feature::PlacedFeature::Profile(#id) }
+                    } else {
+                        let name = f.strip_prefix("minecraft:").unwrap_or(f);
+                        let variant_name = format_ident!("{}", name.to_pascal_case());
+                        quote! { crate::placed_feature::PlacedFeature::#variant_name }
+                    }
                 })
                 .collect();
             quote! { &[#(#step_features),*] }
@@ -441,6 +452,10 @@ fn emit_biome(
     }
 }
 
+fn profile_carver_ident(id: &str) -> proc_macro2::Ident {
+    format_ident!("CARVER_{}", id.to_shouty_snake_case())
+}
+
 pub fn build_profile(
     data: &std::path::Path,
     overworld_climate: &Value,
@@ -456,6 +471,17 @@ pub fn build_profile(
         .count();
     let placed = crate::profile_resources::files(data, "worldgen/placed_feature")
         .expect("Cannot enumerate staged placed features");
+    let carver_files = crate::profile_resources::files(data, "worldgen/carver")
+        .expect("Cannot enumerate staged carvers");
+    let carvers = carver_files.iter().map(|(id, path)| {
+        let ident = profile_carver_ident(id);
+        let mut value = crate::profile_resources::read_json(path);
+        if id != "minecraft:nether_cave" && !id.starts_with("incendium:") {
+            crate::extreme_height::map_height_anchors(&mut value["y"]);
+        }
+        let config = crate::carver::config(&value);
+        quote! { pub(super) static #ident: CarverConfig = #config; }
+    });
     let mut defs = Vec::new();
     let mut name_arms = Vec::new();
     let mut id_arms = Vec::new();
@@ -464,16 +490,26 @@ pub fn build_profile(
 
     for (index, (name, path)) in files
         .iter()
-        .filter(|(name, _)| !name.starts_with("minecraft:"))
+        .filter(|(name, _)| name.starts_with("minecraft:"))
+        .chain(
+            files
+                .iter()
+                .filter(|(name, _)| !name.starts_with("minecraft:")),
+        )
         .enumerate()
     {
         let value = crate::profile_resources::read_json(path);
         let mut biome: Biome = serde_json::from_value(value.clone())
             .unwrap_or_else(|error| panic!("Invalid biome {name}: {error}"));
         biome.apply_natural_mob_spawns();
-        // Decoration and carver registries are still the vanilla set.
-        biome.carvers.clear();
-        for step in &mut biome.features {
+        for carver in &biome.carvers {
+            let id = crate::profile_resources::canonical_id(carver);
+            assert!(
+                carver_files.contains_key(&id),
+                "Missing carver {id} for {name}"
+            );
+        }
+        for step in &biome.features {
             for feature in step.iter() {
                 let id = if feature.contains(':') {
                     feature.clone()
@@ -485,18 +521,40 @@ pub fn build_profile(
                     "Missing placed feature {id} for {name}"
                 );
             }
-            step.clear();
         }
-        let raw_id =
-            u8::try_from(vanilla_count + index).expect("Too many biomes for the chunk palette");
+        let raw_id = u8::try_from(index).expect("Too many biomes for the chunk palette");
         let index = LitInt::new(&raw_id.to_string(), Span::call_site());
-        let ident = format_ident!("{}", name.to_shouty_snake_case());
-        defs.push(emit_biome(name, &ident, &index, bedrock_ids[name], &biome));
-        name_arms.push(quote! { #name => Some(&Biome::#ident), });
+        let ident = if name.starts_with("minecraft:") {
+            format_ident!("PROFILE_{}", name.to_shouty_snake_case())
+        } else {
+            format_ident!("{}", name.to_shouty_snake_case())
+        };
+        let network_id = if let Some(&id) = bedrock_ids.get(name) {
+            quote!(#id)
+        } else {
+            let vanilla = format_ident!(
+                "{}",
+                name.strip_prefix("minecraft:")
+                    .unwrap()
+                    .to_shouty_snake_case()
+            );
+            quote!(Biome::#vanilla.be_network_id)
+        };
+        let biome_name = if usize::from(raw_id) < vanilla_count {
+            name.strip_prefix("minecraft:").unwrap()
+        } else {
+            name
+        };
+        defs.push(emit_biome(
+            biome_name, &ident, &index, network_id, &biome, true,
+        ));
         id_arms.push(quote! { #index => Some(&Biome::#ident), });
+        if usize::from(raw_id) >= vanilla_count {
+            name_arms.push(quote! { #name => Some(&Biome::#ident), });
+            let json = value.to_string();
+            custom_json.push(quote! { (#name, #json), });
+        }
         aliases.insert(name.as_str(), ident);
-        let json = value.to_string();
-        custom_json.push(quote! { (#name, #json), });
     }
 
     let climate = |entries: &Value| {
@@ -528,6 +586,14 @@ pub fn build_profile(
         use crate::biome::{Biome, SpawnGroups, Spawner, SpawnCosts, ParameterPoint};
         use pumpkin_util::biome::{Weather, TemperatureModifier};
 
+        #[allow(unused_imports)]
+        mod carvers {
+            use crate::carver::*;
+            use pumpkin_util::math::float_provider::*;
+            use pumpkin_util::math::int_provider::*;
+            use pumpkin_util::y_offset::{AboveBottom, Absolute, BelowTop, RelativeToSeaLevel, YOffset};
+            #(#carvers)*
+        }
         impl Biome {
             #(#defs)*
         }
@@ -538,6 +604,10 @@ pub fn build_profile(
             match name { #(#name_arms)* _ => None }
         }
         pub const fn biome_by_id(id: u8) -> Option<&'static Biome> {
+            if (id as usize) < #vanilla_count { return None; }
+            generation_biome(id)
+        }
+        pub const fn generation_biome(id: u8) -> Option<&'static Biome> {
             match id { #(#id_arms)* _ => None }
         }
     }
@@ -596,8 +666,9 @@ pub fn build() -> TokenStream {
             &name,
             &format_name,
             &index,
-            be_network_id,
+            quote!(#be_network_id),
             &biome,
+            false,
         ));
 
         name_to_type.extend(quote! { #name => Some(&Self::#format_name), });

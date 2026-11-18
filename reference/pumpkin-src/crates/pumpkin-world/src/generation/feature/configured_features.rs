@@ -100,6 +100,7 @@ pub static BONE_MEAL_FEATURES: LazyLock<
 
 pub enum ConfiguredFeature {
     NoOp,
+    Sequence(Vec<super::placed_features::PlacedFeature>),
     Tree(Box<TreeFeature>),
     FallenTree(FallenTreeFeature),
     Flower(RandomPatchFeature),
@@ -536,6 +537,21 @@ impl ConfiguredFeature {
             Self::SteppedColumnCluster(feature) => {
                 feature.generate(chunk, block_registry, random, pos)
             }
+            Self::Sequence(features) => {
+                let mut placed = false;
+                for feature in features {
+                    placed |= feature.generate(
+                        chunk,
+                        block_registry,
+                        min_y,
+                        height,
+                        feature_name,
+                        random,
+                        pos,
+                    );
+                }
+                placed
+            }
             Self::NoOp => false,
         }
     }
@@ -544,6 +560,61 @@ impl ConfiguredFeature {
 // generated code is now placed alongside other codegen outputs
 // in `src/generated` so we don’t hide it deep under `generation/feature`.
 include!("../../../../pumpkin-data/src/generated/configured_features_generated.rs");
+
+pub(super) fn configured_at(
+    name: &pumpkin_data::configured_feature::ConfiguredFeature,
+) -> Option<&'static ConfiguredFeature> {
+    match name {
+        pumpkin_data::configured_feature::ConfiguredFeature::Profile(_) => {
+            profile::configured(name)
+        }
+        _ => CONFIGURED_FEATURES.get(name),
+    }
+}
+
+mod profile {
+    use super::{super::placed_features::PlacedFeature, ConfiguredFeature};
+    use pumpkin_data::{
+        configured_feature::ConfiguredFeature as ConfiguredKey,
+        placed_feature::PlacedFeature as PlacedKey,
+    };
+    #[cfg(pumpkin_compiled_worldgen_profile)]
+    use std::collections::HashMap;
+    #[cfg(pumpkin_compiled_worldgen_profile)]
+    use std::sync::LazyLock;
+
+    #[cfg(pumpkin_compiled_worldgen_profile)]
+    include!(env!("PUMPKIN_WORLDGEN_PROFILE_DECORATION"));
+
+    #[cfg(pumpkin_compiled_worldgen_profile)]
+    static CONFIGURED: LazyLock<HashMap<ConfiguredKey, ConfiguredFeature>> =
+        LazyLock::new(build_profile_configured_features);
+    #[cfg(pumpkin_compiled_worldgen_profile)]
+    static PLACED: LazyLock<HashMap<PlacedKey, PlacedFeature>> =
+        LazyLock::new(build_profile_placed_features);
+
+    pub(super) fn configured(key: &ConfiguredKey) -> Option<&'static ConfiguredFeature> {
+        #[cfg(pumpkin_compiled_worldgen_profile)]
+        return CONFIGURED.get(key);
+        #[cfg(not(pumpkin_compiled_worldgen_profile))]
+        {
+            let _ = key;
+            None
+        }
+    }
+
+    pub(in crate::generation) fn placed(key: &PlacedKey) -> Option<&'static PlacedFeature> {
+        #[cfg(pumpkin_compiled_worldgen_profile)]
+        return PLACED.get(key);
+        #[cfg(not(pumpkin_compiled_worldgen_profile))]
+        {
+            let _ = key;
+            None
+        }
+    }
+}
+
+pub(in crate::generation) use profile::placed as profile_placed;
 
 #[cfg(test)]
 mod tests {

@@ -3121,18 +3121,17 @@ impl World {
                 owner_id: String::new(),
             },
         };
-        client.send_packet(&CJigsawStructureData).await;
+        let profile_enabled = self.level_info.load().worldgen_profile.is_some();
+        let jigsaw = profile_enabled.then(|| &*PROFILE_JIGSAW_DATA);
+        client.send_packet(&CJigsawStructureData(jigsaw)).await;
         client.send_packet(&CVoxelShapes).await;
         if let Ok(data) = client.serialize_packet(&start_game) {
             client.send_game_packet(data).await;
         }
 
-        let biome_definitions = self
-            .level_info
-            .load()
-            .worldgen_profile
-            .as_ref()
-            .and_then(|_| pumpkin_data::worldgen_profile::bedrock_biomes());
+        let biome_definitions = profile_enabled
+            .then(pumpkin_data::worldgen_profile::bedrock_biomes)
+            .flatten();
         if let Ok(data) = client.serialize_packet(&CBiomeDefinitionList(biome_definitions)) {
             client.send_game_packet(data).await;
         }
@@ -8396,5 +8395,57 @@ mod tests {
         assert!(empty);
         assert!(no_entities);
         Ok(())
+    }
+}
+
+static PROFILE_JIGSAW_DATA: std::sync::LazyLock<pumpkin_nbt::compound::NbtCompound> =
+    std::sync::LazyLock::new(|| {
+        use crate::data::datapack::dynamic_registry_loader::json_to_nbt_tag;
+        use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
+        let mut data = NbtCompound::new();
+        for registry in pumpkin_data::worldgen_profile::structure_registries() {
+            let entries = registry
+                .entries
+                .iter()
+                .map(|&(id, json)| {
+                    let value =
+                        serde_json::from_str(json).expect("Compiled structure registry JSON");
+                    let mut entry = NbtCompound::new();
+                    entry.put_string("name", id.to_owned());
+                    entry.put("definition", json_to_nbt_tag(&value));
+                    NbtTag::Compound(entry)
+                })
+                .collect();
+            data.put_list(registry.bedrock, entries);
+        }
+        data
+    });
+
+#[cfg(test)]
+#[test]
+fn profile_jigsaw_payload_round_trips_as_bedrock_nbt() {
+    use pumpkin_nbt::{Nbt, deserializer::NbtReadHelperBedrock, tag::NbtTag};
+    use pumpkin_protocol::serial::PacketWrite;
+
+    let registries = pumpkin_data::worldgen_profile::structure_registries();
+    if registries.is_empty() {
+        return;
+    }
+    let mut bytes = Vec::new();
+    CJigsawStructureData(Some(&PROFILE_JIGSAW_DATA))
+        .write(&mut bytes)
+        .unwrap();
+    let mut reader = NbtReadHelperBedrock::new(std::io::Cursor::new(bytes.as_slice()));
+    let root = Nbt::read(&mut reader).unwrap().root_tag;
+    for registry in registries {
+        let list = root.get_list(registry.bedrock).unwrap();
+        assert_eq!(list.len(), registry.entries.len());
+        for (tag, (id, _)) in list.iter().zip(registry.entries) {
+            let NbtTag::Compound(entry) = tag else {
+                panic!("Expected definition entry");
+            };
+            assert_eq!(entry.get_string("name"), Some(*id));
+            assert!(entry.get_compound("definition").is_some());
+        }
     }
 }

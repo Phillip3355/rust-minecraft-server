@@ -106,8 +106,8 @@ pub fn load(src: &Path) -> Result<Capabilities, String> {
     arms(&mut cap, "int_provider", &pf, "value_to_int_provider", false, &[])?;
     arms(&mut cap, "height_provider", &pf, "value_to_height_provider", false, &[])?;
     arms(&mut cap, "float_provider", &cg.join("carver.rs"), "value_to_float_provider", false, &[])?;
-    arms(&mut cap, "carver", &cg.join("carver.rs"), "build", false, &[])?;
-    // `build` in carver.rs also contains int/float/height provider arms via helper calls only,
+    arms(&mut cap, "carver", &cg.join("carver.rs"), "config", false, &[])?;
+    // The carver config calls the provider parsers separately,
     // but its direct arms include provider names in some revisions; keep carver ids only.
     if let Some(s) = cap.types.get_mut("carver") {
         let providers: Set = ["minecraft:constant", "minecraft:uniform", "minecraft:trapezoid", "minecraft:biased_to_bottom", "minecraft:very_biased_to_bottom"].iter().map(|s| s.to_string()).collect();

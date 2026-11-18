@@ -274,6 +274,7 @@ pub enum PlacedFeature {
     WildflowersMeadow,
     YellowPoplar,
     YellowPoplarLeafLitter,
+    Profile(&'static str),
 }
 impl PlacedFeature {
     pub fn from_name(name: &str) -> Option<Self> {
@@ -830,6 +831,7 @@ impl PlacedFeature {
             Self::WildflowersMeadow => "wildflowers_meadow",
             Self::YellowPoplar => "yellow_poplar",
             Self::YellowPoplarLeafLitter => "yellow_poplar_leaf_litter",
+            Self::Profile(name) => name,
         }
     }
     #[must_use]

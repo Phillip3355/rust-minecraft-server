@@ -14,6 +14,9 @@ use serde::Deserialize;
 pub enum YOffset {
     /// Absolute world Y coordinate.
     Absolute(Absolute),
+    /// Absolute anchor in staged pack coordinates.
+    #[serde(skip)]
+    ProfileAbsolute(i16),
     /// Offset measured upward from the world's minimum Y.
     AboveBottom(AboveBottom),
     /// Offset measured downward from the world's maximum Y.
@@ -40,6 +43,13 @@ impl YOffset {
                 height as i32 - 1 + min_y as i32 - below_top.below_top as i32
             }
             Self::Absolute(absolute) => absolute.absolute as i32,
+            Self::ProfileAbsolute(y) => {
+                if min_y == -512 && height == 1024 {
+                    extreme_overworld_y(*y as i32)
+                } else {
+                    *y as i32
+                }
+            }
             Self::RelativeToSeaLevel(relative_to_sea_level) => {
                 sea_level + relative_to_sea_level.relative_to_sea_level as i32
             }
@@ -92,4 +102,15 @@ pub struct BelowTop {
 pub struct RelativeToSeaLevel {
     /// Number of blocks relative to the sea level.
     pub relative_to_sea_level: i16,
+}
+
+/// Maps the source Overworld bottom, sea level and peak to the Extreme preset.
+#[must_use]
+pub const fn extreme_overworld_y(y: i32) -> i32 {
+    match y {
+        ..=-64 => y - 448,
+        -63..=63 => -512 + (y + 64) * 112 / 127,
+        64..=319 => -400 + (y - 63) * 800 / 256,
+        _ => 400 + y - 319,
+    }
 }

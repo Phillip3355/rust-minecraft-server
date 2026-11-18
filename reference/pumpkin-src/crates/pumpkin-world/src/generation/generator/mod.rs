@@ -103,7 +103,7 @@ impl WorldGenerator {
 
     #[must_use]
     pub fn uses_worldgen_profile(&self) -> bool {
-        matches!(self, Self::Noise(generator) if matches!(generator.biome_supplier, crate::biome::ActiveBiomeSupplier::Profile(_)))
+        matches!(self, Self::Noise(generator) if generator.uses_worldgen_profile())
     }
 
     /// See [`VanillaGenerator::can_locate_structure`]. Other generators keep every structure.
@@ -160,6 +160,13 @@ pub struct VanillaGenerator {
 }
 
 impl VanillaGenerator {
+    pub fn uses_worldgen_profile(&self) -> bool {
+        matches!(
+            self.biome_supplier,
+            crate::biome::ActiveBiomeSupplier::Profile(_)
+        )
+    }
+
     /// Whether `/locate` may look for `key` through the set at `set_index`, like vanilla
     /// `ChunkGeneratorStructureState.getPlacementsForStructure`: the set has to generate in
     /// this dimension and one of the structure's own biomes has to be possible here.
@@ -300,9 +307,17 @@ impl VanillaGenerator {
 
         let possible_biomes = biome_supplier.possible_biomes();
         let uniform_carvers = {
-            let mut iter = possible_biomes
-                .iter()
-                .filter_map(|&id| pumpkin_data::chunk::Biome::from_id(id as u8).map(|b| b.carvers));
+            let mut iter = possible_biomes.iter().filter_map(|&id| {
+                let biome = if matches!(
+                    biome_supplier,
+                    crate::biome::ActiveBiomeSupplier::Profile(_)
+                ) {
+                    pumpkin_data::worldgen_profile::generation_biome(id as u8)
+                } else {
+                    pumpkin_data::chunk::Biome::from_id(id as u8)
+                };
+                biome.map(|b| b.carvers)
+            });
             iter.next().map_or(Some(&[][..]), |first| {
                 iter.all(|carvers| {
                     std::ptr::eq(first, carvers)

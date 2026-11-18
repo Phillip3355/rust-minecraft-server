@@ -3,6 +3,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use pumpkin_data::block_properties::is_air;
 use pumpkin_data::chunk::DoublePerlinNoiseParameters;
+use pumpkin_data::dimension::Dimension;
 use pumpkin_data::fluid::{Fluid, FluidState};
 use pumpkin_data::structures::{
     Structure, StructureKeys, StructurePlacementType, StructureSet, WeightedEntry,
@@ -22,8 +23,8 @@ use rustc_hash::FxHashMap;
 use super::{
     GlobalRandomConfig, biome_coords,
     blender::{Blender, BlenderImpl},
-    feature::placed_features::PLACED_FEATURES,
-    feature_order::select_features,
+    feature::placed_features::placed_at,
+    feature_order::{select_features, select_profile_features},
     noise::router::{
         multi_noise_sampler::MultiNoiseSampler, proto_noise_router::DoublePerlinNoiseBuilder,
         surface_height_sampler::SurfaceHeightEstimateSampler,
@@ -1357,8 +1358,9 @@ impl ProtoChunk {
     pub fn generate_features_and_structure<T: GenerationCache>(
         cache: &mut T,
         block_registry: &dyn WorldPortalExt,
-        random_config: &GlobalRandomConfig,
+        generator: &super::generator::VanillaGenerator,
     ) {
+        let random_config = &generator.random_config;
         let (center_x, center_z, min_y, generation_min_y, generation_height) = {
             let chunk = cache.get_center_chunk();
             (
@@ -1412,10 +1414,18 @@ impl ProtoChunk {
                 random_config.seed as i64,
             );
 
-            let selected = select_features(&possible_biomes, step);
+            let selected = if generator.uses_worldgen_profile() {
+                select_profile_features(
+                    &possible_biomes,
+                    step,
+                    generator.dimension == Dimension::THE_NETHER,
+                )
+            } else {
+                select_features(&possible_biomes, step)
+            };
 
             for (global_index, feature_enum) in selected {
-                if let Some(feature) = PLACED_FEATURES.get(&feature_enum) {
+                if let Some(feature) = placed_at(&feature_enum) {
                     let decorator_seed =
                         get_decorator_seed(population_seed, global_index as u64, step as u64);
                     let mut random =

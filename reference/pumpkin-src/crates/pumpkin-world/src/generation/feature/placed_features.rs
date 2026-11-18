@@ -16,11 +16,20 @@ use crate::generation::height_provider::HeightProvider;
 use crate::generation::proto_chunk::GenerationCache;
 use crate::world::WorldPortalExt;
 
-use super::configured_features::{CONFIGURED_FEATURES, ConfiguredFeature};
+use super::configured_features::{ConfiguredFeature, configured_at, profile_placed};
 
 pub static PLACED_FEATURES: LazyLock<
     HashMap<pumpkin_data::placed_feature::PlacedFeature, PlacedFeature>,
 > = LazyLock::new(build_placed_features);
+
+pub fn placed_at(
+    key: &pumpkin_data::placed_feature::PlacedFeature,
+) -> Option<&'static PlacedFeature> {
+    match key {
+        pumpkin_data::placed_feature::PlacedFeature::Profile(_) => profile_placed(key),
+        _ => PLACED_FEATURES.get(key),
+    }
+}
 
 pub enum PlacedFeatureWrapper {
     Direct(PlacedFeature),
@@ -31,7 +40,7 @@ impl PlacedFeatureWrapper {
     #[must_use]
     pub fn get(&self) -> Option<&PlacedFeature> {
         match self {
-            Self::Named(name) => PLACED_FEATURES.get(name),
+            Self::Named(name) => placed_at(name),
             Self::Direct(feature) => Some(feature),
         }
     }
@@ -44,6 +53,7 @@ pub struct PlacedFeature {
 }
 
 pub enum Feature {
+    Placed(pumpkin_data::placed_feature::PlacedFeature),
     Named(pumpkin_data::configured_feature::ConfiguredFeature),
     Inlined(Box<ConfiguredFeature>),
 }
@@ -58,8 +68,9 @@ impl PlacedFeature {
         pos: BlockPos,
     ) -> bool {
         let Some(feature) = (match &self.feature {
-            Feature::Named(name) => CONFIGURED_FEATURES.get(name),
+            Feature::Named(name) => configured_at(name),
             Feature::Inlined(feature) => Some(feature.as_ref()),
+            Feature::Placed(_) => None,
         }) else {
             return false;
         };
@@ -91,8 +102,22 @@ impl PlacedFeature {
         random: &mut RandomGenerator,
         pos: BlockPos,
     ) -> bool {
+        if let Feature::Placed(key) = &self.feature {
+            return placed_at(key).is_some_and(|placed| {
+                placed.generate(
+                    chunk,
+                    block_registry,
+                    min_y,
+                    height,
+                    feature_name,
+                    random,
+                    pos,
+                )
+            });
+        }
         let feature = match &self.feature {
-            Feature::Named(name) => CONFIGURED_FEATURES.get(name),
+            Feature::Placed(_) => unreachable!(),
+            Feature::Named(name) => configured_at(name),
             Feature::Inlined(feature) => Some(feature.as_ref()),
         };
 
@@ -168,6 +193,8 @@ where
 pub enum PlacementModifier {
     BlockPredicateFilter(BlockFilterPlacementModifier),
     RarityFilter(RarityFilterPlacementModifier),
+    RandomChance(f32),
+    RandomlySelected(Vec<PlacementModifier>),
     SurfaceRelativeThresholdFilter(SurfaceThresholdFilterPlacementModifier),
     SurfaceWaterDepthFilter(SurfaceWaterDepthFilterPlacementModifier),
     Biome(BiomePlacementModifier),
@@ -199,6 +226,25 @@ impl PlacementModifier {
         match self {
             Self::BlockPredicateFilter(modifier) => {
                 modifier.get_positions(block_registry, chunk, feature, random, pos)
+            }
+            Self::RandomChance(chance) => {
+                Box::new((random.next_f32() < *chance).then_some(pos).into_iter())
+            }
+            Self::RandomlySelected(choices) => {
+                if choices.is_empty() {
+                    Box::new(iter::empty())
+                } else {
+                    let index = random.next_bounded_i32(choices.len() as i32) as usize;
+                    choices[index].get_positions(
+                        chunk,
+                        block_registry,
+                        min_y,
+                        height,
+                        feature,
+                        random,
+                        pos,
+                    )
+                }
             }
             Self::RarityFilter(modifier) => {
                 modifier.get_positions(block_registry, chunk, feature, random, pos)
@@ -521,6 +567,14 @@ impl ConditionalPlacementModifier for BiomePlacementModifier {
     ) -> bool {
         let biome = chunk.get_biome_for_terrain_gen(pos.0.x, pos.0.y, pos.0.z);
 
+        let biome = if matches!(
+            this_feature,
+            pumpkin_data::placed_feature::PlacedFeature::Profile(_)
+        ) {
+            pumpkin_data::worldgen_profile::generation_biome(biome.id).unwrap_or(biome)
+        } else {
+            biome
+        };
         for step in biome.features {
             if step.contains(&this_feature) {
                 return true;

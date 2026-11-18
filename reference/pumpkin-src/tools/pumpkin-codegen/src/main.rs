@@ -81,6 +81,7 @@ mod poi_type;
 mod potion;
 mod potion_brewing;
 mod processor_list;
+mod profile_decoration;
 mod profile_resources;
 mod recipes;
 mod registry;

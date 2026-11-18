@@ -26,84 +26,8 @@ pub fn build() -> TokenStream {
 
     for (name, data) in carvers {
         let variant_name = format_ident!("{}", name.to_uppercase());
-        let carver_type = data["type"].as_str().unwrap_or("");
-
-        let prob = data["probability"].as_f64().unwrap_or(0.0) as f32;
-        let y = value_to_height_provider(&data["y"]);
-
-        let additional = match carver_type {
-            "minecraft:cave" => {
-                let count = value_to_int_provider(&data["count"]);
-                let horizontal_radius_multiplier =
-                    value_to_float_provider(&data["horizontal_radius_multiplier"]);
-                let vertical_radius_multiplier =
-                    value_to_float_provider(&data["vertical_radius_multiplier"]);
-                let floor_level = value_to_float_provider(&data["floor_level"]);
-                let room_vertical_radius_multiplier =
-                    value_to_float_provider(&data["room_vertical_radius_multiplier"]);
-                let start_vertical_radius_multiplier =
-                    if data.get("start_vertical_radius_multiplier").is_some() {
-                        value_to_float_provider(&data["start_vertical_radius_multiplier"])
-                    } else {
-                        quote! { FloatProvider::Constant(1.0) }
-                    };
-                let thickness = value_to_float_provider(&data["thickness"]);
-                let weird_thickness_bias = data["weird_thickness_bias"].as_bool().unwrap_or(false);
-
-                quote! {
-                    CarverAdditionalConfig::Cave(CaveCarverConfig {
-                        count: #count,
-                        horizontal_radius_multiplier: #horizontal_radius_multiplier,
-                        vertical_radius_multiplier: #vertical_radius_multiplier,
-                        floor_level: #floor_level,
-                        room_vertical_radius_multiplier: #room_vertical_radius_multiplier,
-                        start_vertical_radius_multiplier: #start_vertical_radius_multiplier,
-                        thickness: #thickness,
-                        weird_thickness_bias: #weird_thickness_bias,
-                    })
-                }
-            }
-            "minecraft:canyon" => {
-                let vertical_rotation = value_to_float_provider(&data["vertical_rotation"]);
-                let shape = &data["shape"];
-                let distance_factor = value_to_float_provider(&shape["distance_factor"]);
-                let thickness = value_to_float_provider(&shape["thickness"]);
-                let width_smoothness = shape["width_smoothness"].as_i64().unwrap_or(0) as i32;
-                let horizontal_radius_factor =
-                    value_to_float_provider(&shape["horizontal_radius_factor"]);
-                let vertical_radius_default_factor = shape["vertical_radius_default_factor"]
-                    .as_f64()
-                    .unwrap_or(0.0) as f32;
-                let vertical_radius_center_factor = shape["vertical_radius_center_factor"]
-                    .as_f64()
-                    .unwrap_or(0.0) as f32;
-                let y_scale = value_to_float_provider(&shape["y_scale"]);
-
-                quote! {
-                    CarverAdditionalConfig::Canyon(CanyonCarverConfig {
-                        vertical_rotation: #vertical_rotation,
-                        shape: CanyonShapeConfig {
-                            distance_factor: #distance_factor,
-                            thickness: #thickness,
-                            width_smoothness: #width_smoothness,
-                            horizontal_radius_factor: #horizontal_radius_factor,
-                            vertical_radius_default_factor: #vertical_radius_default_factor,
-                            vertical_radius_center_factor: #vertical_radius_center_factor,
-                            y_scale: #y_scale,
-                        }
-                    })
-                }
-            }
-            _ => quote! { CarverAdditionalConfig::Cave(CaveCarverConfig::default()) },
-        };
-
-        carver_instances.push(quote! {
-            pub const #variant_name: CarverConfig = CarverConfig {
-                probability: #prob,
-                y: #y,
-                additional: #additional,
-            };
-        });
+        let config = config(&data);
+        carver_instances.push(quote! { pub const #variant_name: CarverConfig = #config; });
     }
 
     quote! {
@@ -204,6 +128,83 @@ pub fn build() -> TokenStream {
 
         use super::*;
         #(#carver_instances)*
+    }
+}
+
+pub fn config(data: &Value) -> TokenStream {
+    let carver_type = data["type"].as_str().unwrap_or("");
+
+    let prob = data["probability"].as_f64().unwrap_or(0.0) as f32;
+    let y = value_to_height_provider(&data["y"]);
+
+    let additional = match carver_type {
+        "minecraft:cave" => {
+            let count = value_to_int_provider(&data["count"]);
+            let horizontal_radius_multiplier =
+                value_to_float_provider(&data["horizontal_radius_multiplier"]);
+            let vertical_radius_multiplier =
+                value_to_float_provider(&data["vertical_radius_multiplier"]);
+            let floor_level = value_to_float_provider(&data["floor_level"]);
+            let room_vertical_radius_multiplier =
+                value_to_float_provider(&data["room_vertical_radius_multiplier"]);
+            let start_vertical_radius_multiplier =
+                if data.get("start_vertical_radius_multiplier").is_some() {
+                    value_to_float_provider(&data["start_vertical_radius_multiplier"])
+                } else {
+                    quote! { FloatProvider::Constant(1.0) }
+                };
+            let thickness = value_to_float_provider(&data["thickness"]);
+            let weird_thickness_bias = data["weird_thickness_bias"].as_bool().unwrap_or(false);
+
+            quote! {
+                CarverAdditionalConfig::Cave(CaveCarverConfig {
+                    count: #count,
+                    horizontal_radius_multiplier: #horizontal_radius_multiplier,
+                    vertical_radius_multiplier: #vertical_radius_multiplier,
+                    floor_level: #floor_level,
+                    room_vertical_radius_multiplier: #room_vertical_radius_multiplier,
+                    start_vertical_radius_multiplier: #start_vertical_radius_multiplier,
+                    thickness: #thickness,
+                    weird_thickness_bias: #weird_thickness_bias,
+                })
+            }
+        }
+        "minecraft:canyon" => {
+            let vertical_rotation = value_to_float_provider(&data["vertical_rotation"]);
+            let shape = &data["shape"];
+            let distance_factor = value_to_float_provider(&shape["distance_factor"]);
+            let thickness = value_to_float_provider(&shape["thickness"]);
+            let width_smoothness = shape["width_smoothness"].as_i64().unwrap_or(0) as i32;
+            let horizontal_radius_factor =
+                value_to_float_provider(&shape["horizontal_radius_factor"]);
+            let vertical_radius_default_factor = shape["vertical_radius_default_factor"]
+                .as_f64()
+                .unwrap_or(0.0) as f32;
+            let vertical_radius_center_factor = shape["vertical_radius_center_factor"]
+                .as_f64()
+                .unwrap_or(0.0) as f32;
+            let y_scale = value_to_float_provider(&shape["y_scale"]);
+
+            quote! {
+                CarverAdditionalConfig::Canyon(CanyonCarverConfig {
+                    vertical_rotation: #vertical_rotation,
+                    shape: CanyonShapeConfig {
+                        distance_factor: #distance_factor,
+                        thickness: #thickness,
+                        width_smoothness: #width_smoothness,
+                        horizontal_radius_factor: #horizontal_radius_factor,
+                        vertical_radius_default_factor: #vertical_radius_default_factor,
+                        vertical_radius_center_factor: #vertical_radius_center_factor,
+                        y_scale: #y_scale,
+                    }
+                })
+            }
+        }
+        _ => quote! { CarverAdditionalConfig::Cave(CaveCarverConfig::default()) },
+    };
+
+    quote! {
+        crate::carver::CarverConfig { probability: #prob, y: #y, additional: #additional }
     }
 }
 

@@ -716,11 +716,7 @@ fn verify_stage_parity(seed: u64, stage_dumps: &[ChunkStageDump]) {
             chunks: chunks_3x3,
         };
 
-        ProtoChunk::generate_features_and_structure(
-            &mut grid_cache,
-            &block_registry,
-            &generator.random_config,
-        );
+        ProtoChunk::generate_features_and_structure(&mut grid_cache, &block_registry, generator);
 
         let center = grid_cache.chunks.get(&(cx, cz)).unwrap();
         if let Some(expected) = chunk_dump.stages.get("minecraft:features") {
@@ -749,4 +745,102 @@ fn end_stage_parity_hashes() {
     let stages: Vec<ChunkStageDump> =
         pumpkin_util::read_data_from_file!("../../../../../assets/tests/end_stage_hashes.json");
     verify_stage_parity(0, &stages);
+}
+
+#[cfg(pumpkin_compiled_worldgen_profile)]
+#[test]
+fn profile_staged_packs_reach_generation_and_persistence() {
+    use crate::generation::feature::placed_features::placed_at;
+    use crate::generation::feature_order::select_profile_features;
+    use crate::world_info::{
+        LevelData, WorldGenSettings, WorldInfoError, WorldInfoReader, WorldInfoWriter,
+        anvil::AnvilLevelInfo,
+        worldgen_profile::{EXTREME_PROFILE_ID, WorldgenProfile},
+    };
+    use pumpkin_data::worldgen_profile as profile_data;
+
+    let compiled = profile_data::terrain_profile().unwrap();
+    let profile = WorldgenProfile::from_compiled(compiled);
+    assert_eq!(profile_data::java_biomes().len(), 103);
+    assert_eq!(profile_data::structure_names().len(), 38);
+    let mut stale_profile = profile.clone();
+    stale_profile.input_sha256.replace_range(..2, "xx");
+    assert!(matches!(
+        stale_profile.generator(Seed(42), Dimension::OVERWORLD),
+        Err(WorldInfoError::WorldgenProfileMismatch)
+    ));
+
+    for (dimension, input, bounds, namespace) in [
+        (
+            Dimension::OVERWORLD,
+            &compiled.overworld,
+            (-512, 1024, 1024),
+            "terralith:",
+        ),
+        (
+            Dimension::THE_NETHER,
+            &compiled.nether,
+            (0, 256, 192),
+            "incendium:",
+        ),
+    ] {
+        let world_gen = profile.generator(Seed(42), dimension).unwrap();
+        let WorldGenerator::Noise(generator) = &world_gen else {
+            panic!("Expected noise generator");
+        };
+        let dimension = world_gen.dimension();
+        assert_eq!(
+            (dimension.min_y, dimension.height, dimension.logical_height),
+            bounds
+        );
+        assert!(world_gen.uses_worldgen_profile());
+        let nether = dimension == &Dimension::THE_NETHER;
+        let ids: Vec<_> = input.climate.iter().map(|&(_, biome)| biome.id).collect();
+        let selected: Vec<_> = (0..11)
+            .flat_map(|step| select_profile_features(&ids, step, nether))
+            .collect();
+        assert!(
+            selected
+                .iter()
+                .any(|(_, key)| key.to_name().starts_with(namespace))
+        );
+        assert!(selected.iter().all(|(_, key)| placed_at(key).is_some()));
+        assert!(input.climate.iter().any(
+            |(_, biome)| biome.registry_id.starts_with(namespace) && !biome.carvers.is_empty()
+        ));
+
+        let mut chunk = ProtoChunk::new(0, 0, &world_gen);
+        chunk.step_to_biomes(generator);
+        chunk.set_structure_starts(generator);
+        chunk.set_structure_references(generator);
+        chunk.step_to_noise(generator);
+        chunk.step_to_surface(generator, &super::surface_biomes(&world_gen, 0, 0));
+        let surface = compute_chunk_stage_hashes(&chunk).0;
+        chunk.step_to_carvers(generator);
+        let carved = compute_chunk_stage_hashes(&chunk).0;
+        ProtoChunk::generate_features_and_structure(&mut chunk, &TestBlockRegistry, generator);
+        let decorated = compute_chunk_stage_hashes(&chunk).0;
+        assert!(
+            surface != carved || carved != decorated,
+            "No block changes in {namespace} generation stages"
+        );
+        assert_eq!(chunk.stage, crate::chunk_system::StagedChunkEnum::Features);
+        assert_eq!(i32::from(chunk.height()), bounds.1);
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let mut level = LevelData::default(Seed(42));
+    level.worldgen_profile = Some(profile.clone());
+    level.world_gen_settings =
+        WorldGenSettings::from_preset_name(EXTREME_PROFILE_ID, Seed(42)).unwrap();
+    AnvilLevelInfo
+        .write_world_info(&level, directory.path())
+        .unwrap();
+    let restored = AnvilLevelInfo.read_world_info(directory.path()).unwrap();
+    restored.worldgen_profile_matches(Some(&profile)).unwrap();
+    assert_eq!(restored.world_gen_settings, level.world_gen_settings);
+    assert!(matches!(
+        restored.worldgen_profile_matches(None),
+        Err(WorldInfoError::WorldgenProfileMismatch)
+    ));
 }

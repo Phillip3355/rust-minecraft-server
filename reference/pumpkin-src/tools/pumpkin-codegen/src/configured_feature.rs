@@ -70,6 +70,7 @@ pub fn build_enum() -> TokenStream {
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
         pub enum ConfiguredFeature {
             #(#variants)*
+            Profile(&'static str),
         }
 
         impl ConfiguredFeature {
@@ -84,6 +85,7 @@ pub fn build_enum() -> TokenStream {
             pub const fn to_name(&self) -> &'static str {
                 match self {
                     #(#to_name_arms)*
+                    Self::Profile(name) => name,
                 }
             }
         }
@@ -105,9 +107,20 @@ pub fn build() -> TokenStream {
         })
         .collect();
 
+    emit_builder(
+        format_ident!("build_configured_features"),
+        quote!(
+            pumpkin_data::configured_feature::ConfiguredFeature,
+            ConfiguredFeature
+        ),
+        quote! { #(#entries)* },
+    )
+}
+
+pub fn emit_builder(function: syn::Ident, types: TokenStream, entries: TokenStream) -> TokenStream {
     quote! {
         #[allow(clippy::all, unused_imports, dead_code, clippy::large_stack_frames, clippy::too_many_lines)]
-        fn build_configured_features() -> std::collections::HashMap<pumpkin_data::configured_feature::ConfiguredFeature, ConfiguredFeature> {
+        fn #function() -> std::collections::HashMap<#types> {
             use crate::generation::block_predicate::{
                 AllOfBlockPredicate, AnyOfBlockPredicate, BlockPredicate,
                 HasSturdyFacePredicate, InsideWorldBoundsBlockPredicate,
@@ -230,8 +243,9 @@ pub fn build() -> TokenStream {
             use pumpkin_util::math::vector3::Vector3;
             use pumpkin_util::HeightMap;
             use crate::generation::feature::features::drip_stone::small::SmallDripstoneFeature;
+            use pumpkin_util::math::position::BlockPos;
             let mut map = std::collections::HashMap::new();
-            #(#entries)*
+            #entries
             map
         }
     }
@@ -666,7 +680,7 @@ pub fn value_to_configured_feature(v: &Value) -> TokenStream {
 
             if type_str == "minecraft:vegetation_patch" {
                 quote! {
-                    ConfiguredFeature::VegetationPatch(vegetation_patch::VegetationPatchFeature {
+                    ConfiguredFeature::VegetationPatch(crate::generation::feature::features::vegetation_patch::VegetationPatchFeature {
                         replaceable: #replaceable,
                         ground_state: #ground_state,
                         vegetation_feature: Box::new(#vegetation_feature),
@@ -681,8 +695,8 @@ pub fn value_to_configured_feature(v: &Value) -> TokenStream {
                 }
             } else {
                 quote! {
-                    ConfiguredFeature::WaterloggedVegetationPatch(waterlogged_vegetation_patch::WaterloggedVegetationPatchFeature {
-                        base: vegetation_patch::VegetationPatchFeature {
+                    ConfiguredFeature::WaterloggedVegetationPatch(crate::generation::feature::features::waterlogged_vegetation_patch::WaterloggedVegetationPatchFeature {
+                        base: crate::generation::feature::features::vegetation_patch::VegetationPatchFeature {
                             replaceable: #replaceable,
                             ground_state: #ground_state,
                             vegetation_feature: Box::new(#vegetation_feature),
@@ -1003,9 +1017,14 @@ pub fn value_to_configured_feature(v: &Value) -> TokenStream {
         "minecraft:dripstone_cluster" | "minecraft:speleothem_cluster" => {
             quote! { ConfiguredFeature::DripstoneCluster(crate::generation::feature::features::drip_stone::cluster::DripstoneClusterFeature {}) }
         }
-        "minecraft:sequence" => {
-            quote! { ConfiguredFeature::NoOp }
+        "pumpkin:profile_sequence" => {
+            let features = config["features"]
+                .as_array()
+                .expect("Missing sequence features");
+            let features = features.iter().map(value_to_inline_placed_feature);
+            quote! { ConfiguredFeature::Sequence(vec![#(#features),*]) }
         }
+        "minecraft:sequence" => quote! { ConfiguredFeature::NoOp },
         "minecraft:stepped_column_cluster" => {
             let block = value_to_block_state_provider(&config["block"]);
             let can_replace = value_to_block_predicate(&config["can_replace"]);
@@ -1047,7 +1066,7 @@ pub fn value_to_configured_feature(v: &Value) -> TokenStream {
             let growth_rounds = config["growth_rounds"].as_u64().unwrap() as i32;
             let spread_rounds = config["spread_rounds"].as_u64().unwrap() as i32;
             let extra_rare_growths = value_to_int_provider(&config["extra_rare_growths"]);
-            let catalyst_chance = config["catalyst_chance"].as_f64().unwrap() as f32;
+            let catalyst_chance = config["catalyst_chance"].as_f64().unwrap_or(0.0) as f32;
             quote! {
                 ConfiguredFeature::SculkPatch(crate::generation::feature::features::sculk_patch::SculkPatchFeature {
                     charge_count: #charge_count,
@@ -1435,6 +1454,7 @@ fn value_to_rule_test(v: &Value) -> TokenStream {
         "minecraft:random_block_match" => {
             let block = v["block"].as_str().unwrap_or("minecraft:stone");
             let prob = v["probability"].as_f64().unwrap_or(0.5) as f32;
+            let block = block.strip_prefix("minecraft:").unwrap_or(block);
             let block_ident =
                 quote::format_ident!("{}", block.to_uppercase().replace([':', '-'], "_"));
             quote! { RuleTest::RandomBlockMatch(RandomBlockMatchRuleTest { block: pumpkin_data::BlockId::#block_ident, probability: #prob }) }
@@ -1598,7 +1618,7 @@ fn value_to_block_list(v: &Value) -> TokenStream {
             }
         }
     }
-    quote! { &[#(#blocks),*] }
+    quote! { const { &[#(#blocks),*] } }
 }
 
 /// Converts a trunk-placer JSON object into a `TrunkPlacer` token stream.
@@ -1942,7 +1962,40 @@ fn value_to_tree_decorator(v: &Value) -> Option<TokenStream> {
 ///
 /// # Arguments
 /// – `v` – the JSON object containing `"feature"` and `"placement"` fields.
-fn value_to_inline_placed_feature(v: &Value) -> TokenStream {
+pub fn placed_feature_key(name: &str) -> TokenStream {
+    if let Some(id) = name.strip_prefix("profile/") {
+        quote! { pumpkin_data::placed_feature::PlacedFeature::Profile(#id) }
+    } else {
+        let variant = format_ident!(
+            "{}",
+            name.strip_prefix("minecraft:")
+                .unwrap_or(name)
+                .to_pascal_case()
+        );
+        quote! { pumpkin_data::placed_feature::PlacedFeature::#variant }
+    }
+}
+
+pub fn named_configured_feature(name: &str) -> TokenStream {
+    let key = if let Some(id) = name.strip_prefix("profile/") {
+        quote! { pumpkin_data::configured_feature::ConfiguredFeature::Profile(#id) }
+    } else {
+        let variant = format_ident!(
+            "{}",
+            name.strip_prefix("minecraft:")
+                .unwrap_or(name)
+                .to_pascal_case()
+        );
+        quote! { pumpkin_data::configured_feature::ConfiguredFeature::#variant }
+    };
+    quote! { Feature::Named(#key) }
+}
+
+pub fn value_to_inline_placed_feature(v: &Value) -> TokenStream {
+    if let Some(name) = v.as_str() {
+        let key = placed_feature_key(name);
+        return quote! { PlacedFeature { feature: Feature::Placed(#key), placement: Vec::new() } };
+    }
     let feature = value_to_feature_ref(&v["feature"]);
     let placement_arr = v["placement"]
         .as_array()
@@ -1970,9 +2023,8 @@ fn value_to_inline_placed_feature(v: &Value) -> TokenStream {
 fn value_to_placed_feature_wrapper(v: &Value) -> TokenStream {
     match v {
         Value::String(s) => {
-            let name = s.strip_prefix("minecraft:").unwrap_or(s);
-            let variant_name = format_ident!("{}", name.to_pascal_case());
-            quote! { PlacedFeatureWrapper::Named(pumpkin_data::placed_feature::PlacedFeature::#variant_name) }
+            let key = placed_feature_key(s);
+            quote! { PlacedFeatureWrapper::Named(#key) }
         }
         Value::Object(_) => {
             // It might be a PlacedFeature object
@@ -1994,11 +2046,7 @@ fn value_to_placed_feature_wrapper(v: &Value) -> TokenStream {
 /// `Feature::Named` for a string value or `Feature::Inlined` for an object; defaults to `Feature::Named(pumpkin_data::configured_feature::ConfiguredFeature::NoOp)` for other types.
 fn value_to_feature_ref(v: &Value) -> TokenStream {
     match v {
-        Value::String(s) => {
-            let name = s.strip_prefix("minecraft:").unwrap_or(s);
-            let variant_name = format_ident!("{}", name.to_pascal_case());
-            quote! { Feature::Named(pumpkin_data::configured_feature::ConfiguredFeature::#variant_name) }
-        }
+        Value::String(s) => named_configured_feature(s),
         Value::Object(_) => {
             let cf = value_to_configured_feature(v);
             quote! { Feature::Inlined(Box::new(#cf)) }
@@ -2018,6 +2066,9 @@ fn value_to_feature_ref(v: &Value) -> TokenStream {
 fn value_to_placement_modifier_cf(v: &Value) -> TokenStream {
     let type_str = v["type"].as_str().unwrap_or("");
     match type_str {
+        "minecraft:random_chance" | "minecraft:randomly_selected" => {
+            crate::placed_feature::value_to_placement_modifier(v)
+        }
         "minecraft:biome" => quote! { PlacementModifier::Biome(BiomePlacementModifier) },
         "minecraft:in_square" => quote! { PlacementModifier::InSquare(SquarePlacementModifier) },
         "minecraft:fixed_placement" => {

@@ -15,6 +15,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .canonicalize()?;
         println!("cargo:rerun-if-changed={}", source.display());
         println!(
+            "cargo:rerun-if-changed={}",
+            source.with_file_name("templates.bin").display()
+        );
+        println!(
             "cargo:rustc-env=PUMPKIN_WORLDGEN_PROFILE_SOURCE={}",
             source.display()
         );

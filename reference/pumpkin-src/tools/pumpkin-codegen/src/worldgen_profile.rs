@@ -163,20 +163,51 @@ pub fn compile(staged: &Path, output: &Path) -> Result<()> {
         &nether_dimension["generator"]["biome_source"]["biomes"],
         &bedrock_ids,
     );
+    let decorations = crate::profile_decoration::build(&data)?;
+    let decoration_source = decorations
+        .to_string()
+        .replace(" ; map . insert", " ;\nmap . insert");
     let structure_tokens = crate::structures::build_profile(&data);
-    let pack_json = |registry: &str| -> Result<proc_macro2::TokenStream> {
-        let entries = crate::profile_resources::files(&data, registry)?
+    let overlays = |registry: &str| -> Result<Vec<(String, String)>> {
+        crate::profile_resources::files(&data, registry)?
             .into_iter()
-            .filter(|(name, _)| !name.starts_with("minecraft:"))
-            .map(|(name, file)| {
-                let json = fs::read_to_string(file)?;
-                Ok(quote::quote! { #name => Some(#json), })
+            .filter_map(|(id, file)| {
+                let relative = file.strip_prefix(&data).expect("Staged registry path");
+                let path = relative.to_string_lossy().replace('\\', "/");
+                let from_pack = ["terralith", "incendium"]
+                    .into_iter()
+                    .any(|pack| manifest["input_sha256"][pack].get(path.as_str()).is_some());
+                from_pack.then(|| fs::read_to_string(file).map(|json| (id, json)))
             })
-            .collect::<std::io::Result<Vec<_>>>()?;
-        Ok(quote::quote! { #(#entries)* })
+            .collect::<std::io::Result<_>>()
+            .map_err(Into::into)
     };
-    let pools = pack_json("worldgen/template_pool")?;
-    let processors = pack_json("worldgen/processor_list")?;
+    let processors = overlays("worldgen/processor_list")?;
+    let pools = overlays("worldgen/template_pool")?;
+    let structures = overlays("worldgen/structure")?;
+    let sets = overlays("worldgen/structure_set")?;
+    let pack_matches = |entries: &[(String, String)]| -> proc_macro2::TokenStream {
+        entries
+            .iter()
+            .map(|(id, json)| quote::quote! { #id => Some(#json), })
+            .collect()
+    };
+    let pool_matches = pack_matches(&pools);
+    let processor_matches = pack_matches(&processors);
+    let network_registries = [
+        (
+            "minecraft:worldgen/processor_list",
+            "processors",
+            &processors,
+        ),
+        ("minecraft:worldgen/template_pool", "template_pools", &pools),
+        ("minecraft:worldgen/structure", "jigsaws", &structures),
+        ("minecraft:worldgen/structure_set", "structure_sets", &sets),
+    ];
+    let registry_tokens = network_registries.iter().map(|&(java, bedrock, entries)| {
+        let records = entries.iter().map(|(id, json)| quote::quote! { (#id, #json), });
+        quote::quote! { super::StructureRegistry { java: #java, bedrock: #bedrock, entries: &[#(#records)*] }, }
+    });
     let mut template_bytes = Vec::new();
     let mut templates = Vec::new();
     for (path, bytes) in &resources {
@@ -233,15 +264,17 @@ pub fn compile(staged: &Path, output: &Path) -> Result<()> {
         #bedrock_tokens
         #structure_tokens
 
+        pub const STRUCTURE_REGISTRIES: &[super::StructureRegistry] = &[#(#registry_tokens)*];
+
         const TEMPLATE_BYTES: &[u8] = include_bytes!("templates.bin");
         pub fn template(name: &str) -> Option<&'static [u8]> {
             match name { #(#templates)* _ => None }
         }
         pub fn template_pool(name: &str) -> Option<&'static str> {
-            match name { #pools _ => None }
+            match name { #pool_matches _ => None }
         }
         pub fn processors(name: &str) -> Option<&'static str> {
-            match name { #processors _ => None }
+            match name { #processor_matches _ => None }
         }
 
         pub static TERRAIN_PROFILE: super::TerrainProfile = super::TerrainProfile {
@@ -272,11 +305,11 @@ pub fn compile(staged: &Path, output: &Path) -> Result<()> {
             },
         };
     };
-    let source = crate::format_code(&sources.to_string())
-        .map_err(|_| "Cannot format compiled profile source")?;
+    let source = sources.to_string().replace(" ;", " ;\n");
     fs::create_dir(output)?;
     if let Err(error) = fs::write(output.join("worldgen_profile.rs"), source)
         .and_then(|()| fs::write(output.join("templates.bin"), template_bytes))
+        .and_then(|()| fs::write(output.join("decoration.rs"), decoration_source))
     {
         fs::remove_dir_all(output)?;
         return Err(error.into());

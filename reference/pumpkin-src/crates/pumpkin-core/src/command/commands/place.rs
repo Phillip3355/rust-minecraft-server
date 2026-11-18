@@ -555,6 +555,11 @@ impl CommandExecutor for PlaceFeatureExecutor {
                 FEATURE_INVALID.create_without_context(TextComponent::text(feature_name.clone()))
             })?,
             Feature::Inlined(f) => f.as_ref(),
+            Feature::Placed(_) => {
+                return Err(
+                    FEATURE_INVALID.create_without_context(TextComponent::text(feature_name))
+                );
+            }
         };
 
         let block_pos = BlockPosArgumentType::get_block_pos(context, "pos").unwrap_or_else(|_| {

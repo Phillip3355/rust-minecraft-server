@@ -241,6 +241,7 @@ pub enum ConfiguredFeature {
     Wildflower,
     YellowPoplar,
     YellowPoplarLeafLitter,
+    Profile(&'static str),
 }
 impl ConfiguredFeature {
     pub fn from_name(name: &str) -> Option<Self> {
@@ -731,6 +732,7 @@ impl ConfiguredFeature {
             Self::Wildflower => "wildflower",
             Self::YellowPoplar => "yellow_poplar",
             Self::YellowPoplarLeafLitter => "yellow_poplar_leaf_litter",
+            Self::Profile(name) => name,
         }
     }
 }

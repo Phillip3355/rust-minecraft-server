@@ -58,6 +58,7 @@ pub fn build_enum() -> TokenStream {
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
         pub enum PlacedFeature {
             #(#variants)*
+            Profile(&'static str),
         }
 
         impl PlacedFeature {
@@ -72,6 +73,7 @@ pub fn build_enum() -> TokenStream {
             pub const fn to_name(&self) -> &'static str {
                 match self {
                     #(#to_name_arms)*
+                    Self::Profile(name) => name,
                 }
             }
 
@@ -98,9 +100,13 @@ pub fn build() -> TokenStream {
         })
         .collect();
 
+    emit_builder(format_ident!("build_placed_features"), &entries)
+}
+
+pub fn emit_builder(function: syn::Ident, entries: &[TokenStream]) -> TokenStream {
     quote! {
         #[allow(clippy::all, unused_imports, dead_code, clippy::too_many_lines)]
-        fn build_placed_features() -> std::collections::HashMap<pumpkin_data::placed_feature::PlacedFeature, PlacedFeature> {
+        fn #function() -> std::collections::HashMap<pumpkin_data::placed_feature::PlacedFeature, PlacedFeature> {
             use crate::generation::block_predicate::{
                 AllOfBlockPredicate, AnyOfBlockPredicate, BlockPredicate,
                 HasSturdyFacePredicate, InsideWorldBoundsBlockPredicate,
@@ -161,13 +167,10 @@ fn value_to_placed_feature(v: &Value) -> TokenStream {
 /// `Feature::Named(…)` for string values or `Feature::Inlined(…)` for object values.
 fn value_to_feature(v: &Value) -> TokenStream {
     match v {
-        Value::String(s) => {
-            let name = s.strip_prefix("minecraft:").unwrap_or(s);
-            let variant_name = format_ident!("{}", name.to_pascal_case());
-            quote! { Feature::Named(pumpkin_data::configured_feature::ConfiguredFeature::#variant_name) }
-        }
+        Value::String(s) => crate::configured_feature::named_configured_feature(s),
         Value::Object(_) => {
-            let cf = value_to_inline_configured_feature(v);
+            let cf =
+                quote! { crate::generation::feature::configured_features::ConfiguredFeature::NoOp };
             quote! { Feature::Inlined(Box::new(#cf)) }
         }
         _ => panic!("Wrong feature value"),
@@ -181,9 +184,20 @@ fn value_to_feature(v: &Value) -> TokenStream {
 ///
 /// # Returns
 /// A `PlacementModifier` variant token stream, or `compile_error!` for unknown types.
-fn value_to_placement_modifier(v: &Value) -> TokenStream {
+pub fn value_to_placement_modifier(v: &Value) -> TokenStream {
     let type_str = v["type"].as_str().unwrap_or("");
     match type_str {
+        "minecraft:randomly_selected" => {
+            let placements = v["placements"]
+                .as_array()
+                .expect("Missing placement choices");
+            let choices = placements.iter().map(value_to_placement_modifier);
+            quote! { PlacementModifier::RandomlySelected(vec![#(#choices),*]) }
+        }
+        "minecraft:random_chance" => {
+            let chance = v["chance"].as_f64().expect("Missing placement chance") as f32;
+            quote! { PlacementModifier::RandomChance(#chance) }
+        }
         "minecraft:biome" => quote! { PlacementModifier::Biome(BiomePlacementModifier) },
         "minecraft:in_square" => quote! { PlacementModifier::InSquare(SquarePlacementModifier) },
         "minecraft:fixed_placement" => {
@@ -552,9 +566,8 @@ pub fn value_to_height_provider(v: &Value) -> TokenStream {
                 })
             }
         }
-        "minecraft:constant" => {
-            // constant height provider wraps a y_offset
-            let y = value_to_y_offset(&v["value"]);
+        "minecraft:constant" | "" => {
+            let y = value_to_y_offset(v.get("value").unwrap_or(v));
             // Map to uniform with same min/max
             quote! {
                 HeightProvider::Uniform(UniformHeightProvider {
@@ -578,7 +591,10 @@ pub fn value_to_height_provider(v: &Value) -> TokenStream {
 /// # Returns
 /// A `YOffset` variant token stream; defaults to `YOffset::Absolute(0)` when unrecognized.
 pub fn value_to_y_offset(v: &Value) -> TokenStream {
-    if let Some(abs) = v.get("absolute") {
+    if let Some(abs) = v.get("profile_absolute") {
+        let val = abs.as_i64().unwrap_or(0) as i16;
+        quote! { YOffset::ProfileAbsolute(#val) }
+    } else if let Some(abs) = v.get("absolute") {
         let val = abs.as_i64().unwrap_or(0) as i16;
         quote! { YOffset::Absolute(Absolute { absolute: #val }) }
     } else if let Some(ab) = v.get("above_bottom") {
@@ -777,7 +793,8 @@ fn block_state_name_and_props(v: &Value) -> (&str, Option<&Map<String, Value>>) 
             let props = object
                 .get("Properties")
                 .or_else(|| object.get("properties"))
-                .and_then(Value::as_object);
+                .and_then(Value::as_object)
+                .filter(|props| !props.is_empty());
             (name, props)
         }
         _ => ("minecraft:air", None),
@@ -853,9 +870,4 @@ fn value_to_option_i32(v: &Value) -> TokenStream {
     } else {
         quote! { None }
     }
-}
-
-/// Stub for configured feature inline in placed feature
-fn value_to_inline_configured_feature(_v: &Value) -> TokenStream {
-    quote! { crate::generation::feature::configured_features::ConfiguredFeature::NoOp }
 }
